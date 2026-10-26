@@ -10,6 +10,13 @@ const g = await generateProduct({ text: "qizil ko'ylak 180000 so'm" });
 const p = addProduct({ shop_id: shop.id, category: g.category, price: g.price, currency: g.currency, attributes: g.attributes, translations: g.translations, photos: [] });
 assert.equal(p.price, 180000);
 
+const { enhance } = await import("./image.js");
+const sharp = (await import("sharp")).default;
+const raw = await sharp({ create: { width: 2400, height: 1800, channels: 3, background: "#884422" } }).png().toBuffer();
+const out = await sharp(await enhance(raw)).metadata();
+assert.equal(out.format, "jpeg");
+assert.ok(out.width! <= 1600);
+
 const srv = createServer().listen(0);
 const base = `http://localhost:${(srv.address() as any).port}`;
 const cat = await (await fetch(`${base}/s/${shop.slug}?lang=ru`)).text();

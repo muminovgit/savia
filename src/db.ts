@@ -111,6 +111,14 @@ export const getProduct = (id: number) => {
 export const listProducts = (shopId: number) =>
   db.prepare("SELECT * FROM products WHERE shop_id = ? ORDER BY id DESC").all(shopId).map(toProduct);
 
+export function updateProductPhotos(id: number, shopId: number, photos: string[]) {
+  db.prepare("UPDATE products SET photo = ? WHERE id = ? AND shop_id = ?").run(
+    photos.length ? JSON.stringify(photos) : null,
+    id,
+    shopId,
+  );
+}
+
 export function deleteProduct(id: number, shopId: number): boolean {
   return db.prepare("DELETE FROM products WHERE id = ? AND shop_id = ?").run(id, shopId).changes > 0;
 }

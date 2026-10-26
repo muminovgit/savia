@@ -1,7 +1,8 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getShopById, listProducts, updateShop } from "./db.js";
+import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getProduct, listProducts, updateProductPhotos, updateShop } from "./db.js";
+import { enhance, hasRemoveBg, whiteBackground } from "./image.js";
 import { generateProduct } from "./ai.js";
 import { setSellerNotifier } from "./server.js";
 
@@ -61,6 +62,33 @@ export function createBot(token: string) {
   const MAX_IMAGES = 6;
   const MAX_AI_IMAGES = 4;
 
+  const productKeyboard = (id: number, hasPhotos: boolean) => {
+    const kb = new InlineKeyboard();
+    if (hasPhotos && hasRemoveBg) kb.text("Oq fon", `bg:${id}`);
+    return kb.text("O'chirish", `del:${id}`);
+  };
+
+  bot.callbackQuery(/^bg:(\d+)$/, async (ctx) => {
+    const shop = shopOf(ctx);
+    const p = getProduct(Number(ctx.match[1]));
+    if (!p || p.shop_id !== shop.id) return void ctx.answerCallbackQuery("Topilmadi");
+    if (!hasRemoveBg) return void ctx.answerCallbackQuery({ text: "Oq fon hali sozlanmagan", show_alert: true });
+    await ctx.answerCallbackQuery("Ishlayapti, biroz kuting...");
+    let failed = 0;
+    const out: string[] = [];
+    for (const f of p.photos) {
+      try {
+        out.push(await whiteBackground(f));
+      } catch (e) {
+        failed++;
+        console.error("white background failed", e);
+        out.push(f);
+      }
+    }
+    updateProductPhotos(p.id, shop.id, out);
+    await ctx.reply(failed ? `Oq fon: ${out.length - failed}/${out.length} rasm tayyor.` : `Oq fon tayyor (#${p.id}). Katalog: ${link(shop.slug)}`);
+  });
+
   async function createFromMessage(ctx: any, text: string, files: Img[]) {
     const shop = shopOf(ctx);
     await ctx.replyWithChatAction("typing");
@@ -72,8 +100,10 @@ export function createBot(token: string) {
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length > MAX_PHOTO_BYTES) continue;
       const mediaType = (MEDIA as readonly string[]).includes(f.mime) ? (f.mime as (typeof MEDIA)[number]) : "image/jpeg";
-      const name = `${randomUUID()}.${mediaType.split("/")[1]}`;
-      writeFileSync(`${DATA_DIR}/photos/${name}`, buf);
+      const id = randomUUID();
+      const name = `${id}.jpg`;
+      writeFileSync(`${DATA_DIR}/photos/${id}.orig`, buf);
+      writeFileSync(`${DATA_DIR}/photos/${name}`, await enhance(buf).catch(() => buf));
       photos.push(name);
       if (images.length < MAX_AI_IMAGES) images.push({ base64: buf.toString("base64"), mediaType });
     }
@@ -83,7 +113,7 @@ export function createBot(token: string) {
       const uz = p.translations.uz;
       await ctx.reply(
         `Qo'shildi (#${p.id}, ${photos.length} ta rasm):\n\n${uz.title}\n${uz.description}\nNarxi: ${p.price ?? "ko'rsatilmagan"} ${p.currency}\n\nKatalog: ${link(shop.slug)}`,
-        { reply_markup: new InlineKeyboard().text("O'chirish", `del:${p.id}`) },
+        { reply_markup: productKeyboard(p.id, photos.length > 0) },
       );
     } catch (e) {
       console.error("product generation failed", e);
