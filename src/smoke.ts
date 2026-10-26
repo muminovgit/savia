@@ -190,5 +190,16 @@ assert.equal((await adm(`/products/${cheap.id}`, "DELETE")).status, 200);
 assert.equal(db.getProduct(cheap.id), undefined);
 assert.equal((await fetch(`${base}/admin`)).status, 200);
 
+// --- demo shop ---
+const { seedDemo } = await import("./demo.js");
+seedDemo();
+seedDemo(); // idempotent
+const demo = await (await fetch(`${base}/api/shop/demo`)).json();
+assert.equal(demo.products.length, 4);
+assert.ok(demo.products.every((x: any) => x.photos.length === 1));
+assert.equal((await fetch(`${base}${demo.products[0].photos[0]}`)).status, 200);
+assert.ok(demo.products.some((x: any) => x.oldPrice));
+assert.equal((await (await post("/api/quote", { slug: "demo", items: [{ id: demo.products[0].id, qty: 1, size: "46" }], promo: "DEMO10" })).json()).promoOk, true);
+
 srv.close();
 console.log("smoke ok");

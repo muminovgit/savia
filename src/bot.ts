@@ -32,7 +32,7 @@ export function createBot(token: string) {
 
   /** Owner and invited managers all get shop notifications. */
   const tellAdmins = (shop: Shop, text: string, extra?: Parameters<typeof bot.api.sendMessage>[2]) =>
-    Promise.all(shopAdminIds(shop).map((id) => bot.api.sendMessage(id, text, extra).catch((e) => console.error("notify failed", id, e))));
+    Promise.all(shopAdminIds(shop).filter((id) => id > 0).map((id) => bot.api.sendMessage(id, text, extra).catch((e) => console.error("notify failed", id, e))));
 
   /** The button under a channel post links to the product page and turns into "Tugadi" when nothing is left. */
   async function setChannelButton(shop: Shop, p: Product) {

@@ -1,7 +1,9 @@
 import { createServer } from "./server.js";
 import { createBot } from "./bot.js";
 import { isMockAI } from "./ai.js";
+import { seedDemo } from "./demo.js";
 
+if (process.env.SEED_DEMO === "1") seedDemo();
 const port = Number(process.env.PORT ?? 3000);
 createServer().listen(port, () => console.log(`storefront on :${port}`));
 if (isMockAI) console.warn("ANTHROPIC_API_KEY not set: using mock AI");
