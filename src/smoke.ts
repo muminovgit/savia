@@ -141,5 +141,54 @@ assert.equal(db.broadcastsToday(shop.id), 0);
 db.logBroadcast(shop.id, 2, 0);
 assert.equal(db.broadcastsToday(shop.id), 1);
 
+// --- seller panel API ---
+const owner = { "x-tg-init": initData({ id: 1, first_name: "Owner" }) };
+const stranger = { "x-tg-init": initData({ id: 424242, first_name: "Nobody" }) };
+const adm = (path: string, method = "GET", body?: unknown, h: Record<string, string> = owner) =>
+  fetch(`${base}/api/admin${path}`, { method, headers: { "content-type": "application/json", ...h }, body: body === undefined ? undefined : JSON.stringify(body) });
+assert.equal((await adm("/overview", "GET", undefined, {})).status, 401);
+assert.equal((await adm("/overview", "GET", undefined, stranger)).status, 401);
+const ov = await (await adm("/overview")).json();
+assert.equal(ov.shop.slug, shop.slug);
+assert.ok(ov.stats.products >= 1);
+const plist = (await (await adm("/products")).json()).products;
+const target = plist.find((x: any) => x.id === p.id);
+assert.equal(target.translations.uz.title, g.translations.uz.title);
+// edit: price, category, only the uz title (ru/en must stay intact), stock
+const edited = await (await adm(`/products/${p.id}`, "POST", { price: 200000, category: "Yangi", translations: { uz: { title: "Yangi nom", description: "d" }, ru: {}, en: { title: "" } }, stock: { "46": 4 } })).json();
+assert.equal(edited.product.price, 200000);
+assert.equal(edited.product.translations.uz.title, "Yangi nom");
+assert.equal(edited.product.translations.ru.title, g.translations.ru.title);
+assert.equal(edited.product.translations.en.title, g.translations.en.title); // empty title is ignored, not blanked
+assert.deepEqual(edited.product.stock, { "46": 4 });
+assert.equal((await adm(`/products/${p.id}`, "POST", { price: -5 })).status, 400);
+assert.equal((await adm(`/products/${p.id}`, "POST", { discount: 95 })).status, 400);
+assert.equal((await adm(`/products/${p.id}`, "POST", { stock: { "46": -1 } })).status, 400);
+const disc = await (await adm(`/products/${p.id}`, "POST", { discount: 10 })).json();
+assert.equal(disc.product.price, 180000);
+assert.equal(disc.product.oldPrice, 200000);
+assert.equal((await (await adm(`/products/${p.id}`, "POST", { price: 150000 })).json()).product.oldPrice, null); // manual price clears the discount
+assert.equal((await adm(`/products/${sp.id}`, "POST", { category: "x" }, stranger)).status, 401);
+// orders
+const olist = (await (await adm("/orders")).json()).orders;
+assert.ok(olist.length >= 1 && Array.isArray(olist[0].items));
+const newest = olist.find((o: any) => o.status === "new");
+assert.equal((await (await adm(`/orders/${newest.id}/status`, "POST", { status: "confirmed" })).json()).order.status, "confirmed");
+assert.equal((await adm(`/orders/${newest.id}/status`, "POST", { status: "bogus" })).status, 400);
+// settings + promos
+await adm("/settings", "POST", { name: "Yangi do'kon", phones: ["+998900000000", ""], deliveryFee: 30000, minOrder: 0 });
+const set = (await (await adm("/settings")).json()).settings;
+assert.equal(set.name, "Yangi do'kon");
+assert.deepEqual(set.phones, ["+998900000000"]);
+assert.equal(set.deliveryFee, 30000);
+assert.equal((await adm("/settings", "POST", { name: "" })).status, 400);
+assert.equal((await adm("/promos", "POST", { code: "KUZ15", percent: 15 })).status, 200);
+assert.equal((await adm("/promos", "POST", { code: "x", percent: 15 })).status, 400);
+const off = await (await adm("/promos/KUZ15/off", "POST", {})).json();
+assert.equal(off.promos.find((x: any) => x.code === "KUZ15").active, 0);
+assert.equal((await adm(`/products/${cheap.id}`, "DELETE")).status, 200);
+assert.equal(db.getProduct(cheap.id), undefined);
+assert.equal((await fetch(`${base}/admin`)).status, 200);
+
 srv.close();
 console.log("smoke ok");

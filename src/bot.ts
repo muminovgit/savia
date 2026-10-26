@@ -6,7 +6,7 @@ import { DATA_DIR, broadcastTargets, broadcastsToday, buyerCounts, logBroadcast,
 import { enhance, hasRemoveBg, whiteBackground } from "./image.js";
 import { generateProduct } from "./ai.js";
 import type { Order, OrderStatus, Product, Shop } from "./db.js";
-import { setOrderNotifier, setSellerNotifier, setStockNotifier } from "./server.js";
+import { setAdminHooks, setOrderNotifier, setSellerNotifier, setStockNotifier } from "./server.js";
 
 const PUBLIC_URL = (
   process.env.PUBLIC_URL ??
@@ -59,6 +59,7 @@ export function createBot(token: string) {
     "Buyurtmalar: /orders",
     "Rassilka: /broadcast (xaridorlarga xabar), /buyers",
     "Jamoa: /invite (menejer qo'shish), /admins",
+    "Panel (tugmalar bilan boshqarish): /panel",
     "Do'kon linki: /shop",
   ].join("\n");
 
@@ -79,10 +80,23 @@ export function createBot(token: string) {
       }
     }
     const shop = shopOf(ctx);
+    void setPanelButton(ctx.from!.id);
     await ctx.reply(`Salom! Men Savia botman: Telegramda do'kon ochish va AI yordamchi.\n\nDo'koningiz: ${link(shop.slug)}\n\n${HELP}`);
   });
 
   bot.command("help", (ctx) => ctx.reply(HELP));
+
+  /** The seller panel is a Mini App: a "Panel" menu button in the seller's private chat plus the /panel command. */
+  const panelUrl = `${PUBLIC_URL}/admin`;
+  bot.command("panel", async (ctx) => {
+    shopOf(ctx);
+    if (!panelUrl.startsWith("https://")) return void ctx.reply(`Panel (faqat https orqali ochiladi): ${panelUrl}`);
+    await ctx.reply("Sotuvchi paneli: mahsulotlar, qoldiq, buyurtmalar, sozlamalar.", { reply_markup: new InlineKeyboard().webApp("⚙️ Panelni ochish", panelUrl) });
+  });
+  const setPanelButton = (chatId: number) =>
+    panelUrl.startsWith("https://")
+      ? bot.api.setChatMenuButton({ chat_id: chatId, menu_button: { type: "web_app", text: "Panel", web_app: { url: panelUrl } } }).catch(() => undefined)
+      : undefined;
 
   bot.command("shop", (ctx) => ctx.reply(link(shopOf(ctx).slug)));
 
@@ -278,24 +292,37 @@ export function createBot(token: string) {
     for (const o of orders) await ctx.reply(orderText(o), { reply_markup: orderKeyboard(o) });
   });
 
-  bot.callbackQuery(/^ord:(confirmed|shipped|cancelled):(\d+)$/, async (ctx) => {
-    const status = ctx.match[1] as OrderStatus;
-    const shop = shopOf(ctx);
-    if (!setOrderStatus(Number(ctx.match[2]), shop.id, status)) return void ctx.answerCallbackQuery("Topilmadi");
-    await ctx.answerCallbackQuery(STATUS[status]);
-    const o = getOrder(Number(ctx.match[2]))!;
+  /** Shared by the bot buttons and the panel: restock buttons on cancel, tell the buyer. */
+  async function afterOrderStatus(shop: Shop, o: Order, status: OrderStatus) {
     if (status === "cancelled") {
       for (const it of getOrderItems(o.id)) {
         const p = getProduct(it.product_id);
         if (p?.src_btn) await setChannelButton(shop, p);
       }
     }
-    await ctx.editMessageText(orderText(o), { reply_markup: orderKeyboard(o) });
     if (o.buyer_tg_id) {
       const uz = { new: "yangi", confirmed: "tasdiqlandi", shipped: "yuborildi", cancelled: "bekor qilindi" }[status];
       const ru = { new: "новый", confirmed: "подтверждён", shipped: "отправлен", cancelled: "отменён" }[status];
       bot.api.sendMessage(o.buyer_tg_id, `Buyurtma #${o.id} ${uz} / Заказ #${o.id} ${ru}`).catch(() => undefined);
     }
+  }
+
+  setAdminHooks({
+    onOrderStatus: (shop, order, status) => void afterOrderStatus(shop, order, status),
+    onProductChanged: (shop, id) => {
+      const p = getProduct(id);
+      if (p?.src_btn) void setChannelButton(shop, p);
+    },
+  });
+
+  bot.callbackQuery(/^ord:(confirmed|shipped|cancelled):(\d+)$/, async (ctx) => {
+    const status = ctx.match[1] as OrderStatus;
+    const shop = shopOf(ctx);
+    if (!setOrderStatus(Number(ctx.match[2]), shop.id, status)) return void ctx.answerCallbackQuery("Topilmadi");
+    await ctx.answerCallbackQuery(STATUS[status]);
+    const o = getOrder(Number(ctx.match[2]))!;
+    await ctx.editMessageText(orderText(o), { reply_markup: orderKeyboard(o) });
+    await afterOrderStatus(shop, o, status);
   });
 
   bot.callbackQuery(/^stk:(\d+)$/, async (ctx) => {

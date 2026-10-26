@@ -518,3 +518,33 @@ export const broadcastsToday = (shopId: number) =>
 
 export const logBroadcast = (shopId: number, sent: number, failed: number) =>
   void db.prepare("INSERT INTO broadcasts (shop_id, sent, failed) VALUES (?,?,?)").run(shopId, sent, failed);
+
+// --- admin panel ---
+export const findShopForUser = (tgId: number) =>
+  (db.prepare("SELECT * FROM shops WHERE tg_id = ?").get(tgId) ??
+    db.prepare("SELECT s.* FROM shops s JOIN shop_admins a ON a.shop_id = s.id WHERE a.tg_id = ?").get(tgId)) as Shop | undefined;
+
+export interface ProductPatch {
+  price?: number | null;
+  category?: string;
+  translations?: Partial<Record<Lang, Partial<Translation>>>;
+}
+
+export function updateProduct(id: number, shopId: number, patch: ProductPatch): boolean {
+  const p = getProduct(id);
+  if (!p || p.shop_id !== shopId) return false;
+  if (patch.price !== undefined) {
+    // a manual price change clears any percentage discount
+    db.prepare("UPDATE products SET price = ?, old_price = NULL WHERE id = ?").run(patch.price, id);
+  }
+  if (patch.category !== undefined) db.prepare("UPDATE products SET category = ? WHERE id = ?").run(patch.category.trim().slice(0, 30), id);
+  if (patch.translations) {
+    const merged = { ...p.translations };
+    for (const l of LANGS) {
+      const t = patch.translations[l] ?? {};
+      merged[l] = { title: t.title ?? merged[l].title, description: t.description ?? merged[l].description };
+    }
+    db.prepare("UPDATE products SET translations = ? WHERE id = ?").run(JSON.stringify(merged), id);
+  }
+  return true;
+}

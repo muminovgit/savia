@@ -6,8 +6,24 @@ import {
   DATA_DIR,
   LANGS,
   OutOfStock,
+  buyerCounts,
   createOrder,
+  deleteProduct,
+  findShopForUser,
+  getOrder,
+  getOrderItems,
   getProduct,
+  listOrders,
+  listPromos,
+  savePromo,
+  setDiscount,
+  setOrderStatus,
+  setPromoActive,
+  setStock,
+  shopCategories,
+  updateProduct,
+  updateShop,
+
   getPromo,
   getShopById,
   getShopBySlug,
@@ -21,7 +37,7 @@ import {
   sizesOf,
   usePromo,
 } from "./db.js";
-import type { Lang, Order, Product, Shop } from "./db.js";
+import type { Lang, Order, OrderStatus, Product, Shop } from "./db.js";
 import { answerQuestion } from "./ai.js";
 
 export const esc = (s: unknown) =>
@@ -221,8 +237,178 @@ export function createServer() {
     }
   });
 
+  // ---------------- seller panel API (Telegram-authenticated owner/managers only) ----------------
+  app.get("/admin", (_req, res) => void res.type("html").send(readFileSync(`${WEB_DIR}admin.html`, "utf8")));
+
+  const admin = express.Router();
+  admin.use((req, res, next) => {
+    const user = validateInitData(req.get("x-tg-init") ?? undefined, process.env.BOT_TOKEN);
+    const shop = user ? findShopForUser(user.id) : undefined;
+    if (!shop) return void res.status(401).json({ error: "unauthorized" });
+    res.locals.shop = shop;
+    next();
+  });
+
+  const adminProduct = (p: Product) => ({
+    id: p.id,
+    category: p.category,
+    price: p.price,
+    oldPrice: p.old_price,
+    currency: p.currency,
+    photo: p.photos[0] ? `/photos/${p.photos[0]}` : null,
+    stock: p.stock,
+    soldOut: isSoldOut(p),
+    translations: p.translations,
+    attributes: p.attributes,
+  });
+  const adminOrder = (o: Order) => ({ ...o, items: getOrderItems(o.id) });
+
+  admin.get("/overview", (_req, res) => {
+    const shop: Shop = res.locals.shop;
+    const products = listProducts(shop.id);
+    const orders = listOrders(shop.id, 200);
+    res.json({
+      shop: { name: shop.name, slug: shop.slug },
+      url: process.env.MINIAPP_SHORTNAME
+        ? `https://t.me/${process.env.BOT_USERNAME ?? "savia_shop_bot"}/${process.env.MINIAPP_SHORTNAME}?startapp=${shop.slug}`
+        : `${(process.env.PUBLIC_URL ?? `https://${process.env.RAILWAY_PUBLIC_DOMAIN ?? "localhost:3000"}`).replace(/\/$/, "")}/s/${shop.slug}`,
+      stats: {
+        products: products.length,
+        ordersNew: orders.filter((o) => o.status === "new").length,
+        ordersTotal: orders.length,
+        buyers: buyerCounts(shop.id),
+      },
+      low: products
+        .filter((p) => p.stock && Object.values(p.stock).some((q) => q <= 2))
+        .slice(0, 10)
+        .map((p) => ({ id: p.id, title: p.translations.uz.title, stock: p.stock })),
+    });
+  });
+
+  admin.get("/products", (_req, res) => {
+    const shop: Shop = res.locals.shop;
+    res.json({ products: listProducts(shop.id).map(adminProduct), categories: shopCategories(shop.id) });
+  });
+
+  admin.post("/products/:id", (req, res) => {
+    const shop: Shop = res.locals.shop;
+    const id = Number(req.params.id);
+    const b = req.body ?? {};
+    const p = getProduct(id);
+    if (!p || p.shop_id !== shop.id) return void res.status(404).json({ error: "not found" });
+    if ("price" in b && b.price !== null && !(Number.isFinite(b.price) && b.price >= 0 && b.price <= 1e10)) return void res.status(400).json({ error: "bad price" });
+    const text = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
+    const translations: Record<string, { title?: string; description?: string }> = {};
+    for (const l of LANGS) {
+      const t = b.translations?.[l];
+      if (!t) continue;
+      translations[l] = { title: text(t.title, 120) || undefined, description: text(t.description, 600) };
+    }
+    updateProduct(id, shop.id, {
+      ...("price" in b ? { price: b.price } : {}),
+      ...(typeof b.category === "string" ? { category: b.category } : {}),
+      translations,
+    });
+    if ("discount" in b) {
+      if (b.discount === null) setDiscount(id, shop.id, null);
+      else if (Number.isInteger(b.discount) && b.discount >= 1 && b.discount <= 90) setDiscount(id, shop.id, b.discount);
+      else return void res.status(400).json({ error: "bad discount" });
+    }
+    if ("stock" in b) {
+      let stock: Record<string, number> | null = null;
+      if (b.stock !== null) {
+        const entries = Object.entries(b.stock ?? {});
+        if (!entries.length || entries.length > 30 || entries.some(([k, q]) => !k || k.length > 12 || !Number.isInteger(q) || (q as number) < 0 || (q as number) > 999999)) {
+          return void res.status(400).json({ error: "bad stock" });
+        }
+        stock = Object.fromEntries(entries) as Record<string, number>;
+      }
+      setStock(id, shop.id, stock);
+    }
+    hooks.onProductChanged?.(shop, id);
+    res.json({ product: adminProduct(getProduct(id)!) });
+  });
+
+  admin.delete("/products/:id", (req, res) => {
+    const shop: Shop = res.locals.shop;
+    res.json({ ok: deleteProduct(Number(req.params.id), shop.id) });
+  });
+
+  admin.get("/orders", (_req, res) => {
+    const shop: Shop = res.locals.shop;
+    res.json({ orders: listOrders(shop.id, 100).map(adminOrder) });
+  });
+
+  admin.post("/orders/:id/status", (req, res) => {
+    const shop: Shop = res.locals.shop;
+    const status = req.body?.status as OrderStatus;
+    if (!["confirmed", "shipped", "cancelled"].includes(status)) return void res.status(400).json({ error: "bad status" });
+    const id = Number(req.params.id);
+    if (!setOrderStatus(id, shop.id, status)) return void res.status(404).json({ error: "not found" });
+    const order = getOrder(id)!;
+    hooks.onOrderStatus?.(shop, order, status);
+    res.json({ order: adminOrder(order) });
+  });
+
+  admin.get("/settings", (_req, res) => {
+    const shop: Shop = res.locals.shop;
+    res.json({
+      settings: {
+        name: shop.name, about: shop.about, contact: shop.contact, payment: shop.payment, address: shop.address,
+        phones: shopPhones(shop), minOrder: shop.min_order, deliveryFee: shop.delivery_fee, freeFrom: shop.free_from,
+      },
+      promos: listPromos(shop.id),
+    });
+  });
+
+  admin.post("/settings", (req, res) => {
+    const shop: Shop = res.locals.shop;
+    const b = req.body ?? {};
+    const s = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : undefined);
+    const n = (v: unknown) => (Number.isFinite(v) && (v as number) >= 0 && (v as number) <= 1e10 ? (v as number) : undefined);
+    const name = s(b.name, 60);
+    if (name === "") return void res.status(400).json({ error: "name required" });
+    const phones = Array.isArray(b.phones) ? b.phones.map((p: unknown) => s(p, 20)).filter(Boolean).slice(0, 3) : undefined;
+    updateShop(shop.id, {
+      ...(name !== undefined ? { name } : {}),
+      ...(s(b.about, 300) !== undefined ? { about: s(b.about, 300)! } : {}),
+      ...(s(b.contact, 80) !== undefined ? { contact: s(b.contact, 80)! } : {}),
+      ...(s(b.payment, 200) !== undefined ? { payment: s(b.payment, 200)! } : {}),
+      ...(s(b.address, 200) !== undefined ? { address: s(b.address, 200)! } : {}),
+      ...(phones ? { phones: JSON.stringify(phones) } : {}),
+      ...(n(b.minOrder) !== undefined ? { min_order: n(b.minOrder)! } : {}),
+      ...(n(b.deliveryFee) !== undefined ? { delivery_fee: n(b.deliveryFee)! } : {}),
+      ...(n(b.freeFrom) !== undefined ? { free_from: n(b.freeFrom)! } : {}),
+    });
+    res.json({ ok: true });
+  });
+
+  admin.post("/promos", (req, res) => {
+    const shop: Shop = res.locals.shop;
+    const code = String(req.body?.code ?? "").trim();
+    const percent = Number(req.body?.percent);
+    if (!/^[A-Za-z0-9_-]{2,20}$/.test(code) || !Number.isInteger(percent) || percent < 1 || percent > 90) return void res.status(400).json({ error: "bad promo" });
+    savePromo(shop.id, code, percent);
+    res.json({ promos: listPromos(shop.id) });
+  });
+
+  admin.post("/promos/:code/off", (req, res) => {
+    const shop: Shop = res.locals.shop;
+    setPromoActive(shop.id, req.params.code, false);
+    res.json({ promos: listPromos(shop.id) });
+  });
+
+  app.use("/api/admin", admin);
+
   return app;
 }
+
+/** Set by the bot: keeps channel buttons and buyer messages in step with panel actions. */
+const hooks: {
+  onProductChanged?: (shop: Shop, productId: number) => void;
+  onOrderStatus?: (shop: Shop, order: Order, status: OrderStatus) => void;
+} = {};
+export const setAdminHooks = (h: typeof hooks) => void Object.assign(hooks, h);
 
 /** Set by the bot so unanswered buyer questions reach the seller. */
 let notifySeller: ((shop: Shop, product: Product, question: string) => void) | undefined;
