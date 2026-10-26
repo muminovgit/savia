@@ -7,5 +7,12 @@ createServer().listen(port, () => console.log(`storefront on :${port}`));
 if (isMockAI) console.warn("ANTHROPIC_API_KEY not set: using mock AI");
 
 const token = process.env.BOT_TOKEN;
-if (token) createBot(token).start({ onStart: (me) => console.log(`bot @${me.username} started`) });
+if (token) {
+  createBot(token)
+    .start({ onStart: (me) => console.log(`bot @${me.username} started`) })
+    .catch((e) => {
+      console.error("bot polling stopped", e);
+      process.exit(1);
+    });
+}
 else console.warn("BOT_TOKEN not set: Telegram bot disabled");

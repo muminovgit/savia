@@ -16,6 +16,11 @@ const MAX_PHOTO_BYTES = 8 * 1024 * 1024;
 
 export function createBot(token: string) {
   const bot = new Bot(token);
+  bot.use(async (ctx, next) => {
+    const kind = Object.keys(ctx.update).find((k) => k !== "update_id");
+    console.log(`update ${ctx.update.update_id} ${kind} from=${ctx.from?.id ?? "-"} chat=${ctx.chat?.id ?? "-"}`);
+    return next();
+  });
   const shopOf = (ctx: { from?: { id: number; first_name: string } }) =>
     getOrCreateShop(ctx.from!.id, ctx.from!.first_name);
   const link = (slug: string) => `${PUBLIC_URL}/s/${slug}`;
