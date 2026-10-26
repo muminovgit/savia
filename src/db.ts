@@ -17,6 +17,13 @@ export interface Shop {
   contact: string;
   payment: string;
   channel_id: number | null;
+  about: string;
+  phones: string; // JSON array
+  address: string;
+  min_order: number;
+  delivery_fee: number;
+  free_from: number;
+  banners: string; // JSON array of photo file names
 }
 
 export interface Product {
@@ -29,6 +36,7 @@ export interface Product {
   translations: Record<Lang, Translation>;
   photos: string[];
   stock: Record<string, number> | null;
+  old_price: number | null;
   src_chat: number | null;
   src_msg: number | null;
   src_btn: number;
@@ -78,7 +86,8 @@ const toProduct = (r: any): Product => ({
 });
 
 export function getOrCreateShop(tgId: number, displayName: string): Shop {
-  const found = db.prepare("SELECT * FROM shops WHERE tg_id = ?").get(tgId) as Shop | undefined;
+  const found = (db.prepare("SELECT * FROM shops WHERE tg_id = ?").get(tgId) ??
+    db.prepare("SELECT s.* FROM shops s JOIN shop_admins a ON a.shop_id = s.id WHERE a.tg_id = ?").get(tgId)) as Shop | undefined;
   if (found) return found;
   const base = displayName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || `shop-${Math.random().toString(36).slice(2, 7)}`;
   let slug = base;
@@ -95,13 +104,19 @@ export const getShopBySlug = (slug: string) =>
 export const getShopById = (id: number) =>
   db.prepare("SELECT * FROM shops WHERE id = ?").get(id) as Shop | undefined;
 
-export function updateShop(id: number, fields: Partial<Pick<Shop, "name" | "contact" | "payment">>) {
-  if (fields.name !== undefined) db.prepare("UPDATE shops SET name = ? WHERE id = ?").run(fields.name, id);
-  if (fields.payment !== undefined) db.prepare("UPDATE shops SET payment = ? WHERE id = ?").run(fields.payment, id);
-  if (fields.contact !== undefined) db.prepare("UPDATE shops SET contact = ? WHERE id = ?").run(fields.contact, id);
+const SHOP_FIELDS = ["name", "contact", "payment", "about", "address", "phones", "min_order", "delivery_fee", "free_from", "banners"] as const;
+type ShopField = (typeof SHOP_FIELDS)[number];
+
+export function updateShop(id: number, fields: Partial<Pick<Shop, ShopField>>) {
+  for (const k of SHOP_FIELDS) {
+    if (fields[k] !== undefined) db.prepare(`UPDATE shops SET ${k} = ? WHERE id = ?`).run(fields[k]!, id);
+  }
 }
 
-export function addProduct(p: Omit<Product, "id" | "stock" | "src_chat" | "src_msg" | "src_btn">, src?: { chat: number; msg: number }): Product {
+export const shopPhones = (s: Shop): string[] => JSON.parse(s.phones || "[]");
+export const shopBanners = (s: Shop): string[] => JSON.parse(s.banners || "[]");
+
+export function addProduct(p: Omit<Product, "id" | "stock" | "old_price" | "src_chat" | "src_msg" | "src_btn">, src?: { chat: number; msg: number }): Product {
   const id = db
     .prepare(
       "INSERT INTO products (shop_id, category, price, currency, attributes, translations, photo, src_chat, src_msg) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -178,6 +193,9 @@ export interface Order {
   address: string;
   note: string;
   total: string;
+  discount: string;
+  delivery: string;
+  buyer_tg_id: number | null;
   status: OrderStatus;
   created_at: string;
 }
@@ -206,21 +224,59 @@ export function setStock(id: number, shopId: number, stock: Record<string, numbe
 
 export const markButton = (id: number, on: boolean) => void db.prepare("UPDATE products SET src_btn = ? WHERE id = ?").run(on ? 1 : 0, id);
 
+export interface Quote {
+  currency: string | null; // null when items mix currencies or have no price: no discount/delivery logic then
+  subtotal: number;
+  discount: number;
+  delivery: number;
+  total: number;
+  text: string;
+}
+
+const fmtMoney = (v: number, c: string) => `${new Intl.NumberFormat("ru-RU").format(v)} ${c}`;
+
+/** Prices an order. Promo percent and delivery only apply when everything is priced in one currency. */
+export function quote(shop: Shop, items: { product: Product; qty: number }[], percent = 0): Quote {
+  const sums = new Map<string, number>();
+  let unpriced = false;
+  for (const { product, qty } of items) {
+    if (product.price == null) unpriced = true;
+    else sums.set(product.currency, (sums.get(product.currency) ?? 0) + product.price * qty);
+  }
+  if (sums.size !== 1 || unpriced) {
+    const text = [...sums].map(([c, v]) => fmtMoney(v, c)).join(" + ");
+    return { currency: null, subtotal: 0, discount: 0, delivery: 0, total: 0, text };
+  }
+  const [[currency, subtotal]] = [...sums];
+  const discount = Math.round((subtotal * percent) / 100);
+  const after = subtotal - discount;
+  const delivery = shop.delivery_fee > 0 && !(shop.free_from > 0 && after >= shop.free_from) ? shop.delivery_fee : 0;
+  const total = after + delivery;
+  return { currency, subtotal, discount, delivery, total, text: fmtMoney(total, currency) };
+}
+
 export function createOrder(
   shopId: number,
-  customer: { name: string; phone: string; address: string; note: string },
+  customer: { name: string; phone: string; address: string; note: string; buyer_tg_id?: number | null },
   items: { product: Product; qty: number; size?: string }[],
+  q: Quote,
+  promoCode?: string,
 ): Order {
-  const totals = new Map<string, number>();
-  for (const { product, qty } of items) {
-    if (product.price != null) totals.set(product.currency, (totals.get(product.currency) ?? 0) + product.price * qty);
-  }
-  const total = [...totals].map(([c, v]) => `${new Intl.NumberFormat("ru-RU").format(v)} ${c}`).join(" + ");
   const tx = db.transaction(() => {
     const id = Number(
       db
-        .prepare("INSERT INTO orders (shop_id, name, phone, address, note, total) VALUES (?,?,?,?,?,?)")
-        .run(shopId, customer.name, customer.phone, customer.address, customer.note, total).lastInsertRowid,
+        .prepare("INSERT INTO orders (shop_id, name, phone, address, note, total, discount, delivery, buyer_tg_id) VALUES (?,?,?,?,?,?,?,?,?)")
+        .run(
+          shopId,
+          customer.name,
+          customer.phone,
+          customer.address,
+          customer.note,
+          q.text,
+          q.discount && q.currency ? `${promoCode ?? ""} -${fmtMoney(q.discount, q.currency)}`.trim() : "",
+          q.delivery && q.currency ? fmtMoney(q.delivery, q.currency) : "",
+          customer.buyer_tg_id ?? null,
+        ).lastInsertRowid,
     );
     const ins = db.prepare("INSERT INTO order_items (order_id, product_id, title, price, currency, qty, size) VALUES (?,?,?,?,?,?,?)");
     for (const { product, qty, size = "" } of items) {
@@ -298,3 +354,116 @@ for (const ddl of [
     /* column already exists */
   }
 }
+
+// --- storefront settings, discounts, promos, admins ---
+for (const ddl of [
+  "ALTER TABLE shops ADD COLUMN about TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE shops ADD COLUMN phones TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE shops ADD COLUMN address TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE shops ADD COLUMN min_order REAL NOT NULL DEFAULT 0",
+  "ALTER TABLE shops ADD COLUMN delivery_fee REAL NOT NULL DEFAULT 0",
+  "ALTER TABLE shops ADD COLUMN free_from REAL NOT NULL DEFAULT 0",
+  "ALTER TABLE shops ADD COLUMN banners TEXT NOT NULL DEFAULT '[]'",
+  "ALTER TABLE products ADD COLUMN old_price REAL",
+  "ALTER TABLE orders ADD COLUMN discount TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE orders ADD COLUMN delivery TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE orders ADD COLUMN buyer_tg_id INTEGER",
+]) {
+  try {
+    db.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS promos (
+  id INTEGER PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id),
+  code TEXT NOT NULL,
+  percent INTEGER NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  uses INTEGER NOT NULL DEFAULT 0,
+  UNIQUE (shop_id, code)
+);
+CREATE TABLE IF NOT EXISTS shop_admins (
+  shop_id INTEGER NOT NULL REFERENCES shops(id),
+  tg_id INTEGER NOT NULL,
+  PRIMARY KEY (shop_id, tg_id)
+);
+CREATE TABLE IF NOT EXISTS invites (
+  token TEXT PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id)
+);
+`);
+
+export interface Promo {
+  id: number;
+  shop_id: number;
+  code: string;
+  percent: number;
+  active: number;
+  uses: number;
+}
+
+const normCode = (c: string) => c.trim().toUpperCase().slice(0, 20);
+
+export const getPromo = (shopId: number, code: string) =>
+  db.prepare("SELECT * FROM promos WHERE shop_id = ? AND code = ? AND active = 1").get(shopId, normCode(code)) as Promo | undefined;
+
+export const listPromos = (shopId: number) => db.prepare("SELECT * FROM promos WHERE shop_id = ? ORDER BY id DESC").all(shopId) as Promo[];
+
+export function savePromo(shopId: number, code: string, percent: number) {
+  db.prepare(
+    "INSERT INTO promos (shop_id, code, percent) VALUES (?,?,?) ON CONFLICT(shop_id, code) DO UPDATE SET percent = excluded.percent, active = 1",
+  ).run(shopId, normCode(code), percent);
+}
+
+export const setPromoActive = (shopId: number, code: string, active: boolean) =>
+  db.prepare("UPDATE promos SET active = ? WHERE shop_id = ? AND code = ?").run(active ? 1 : 0, shopId, normCode(code)).changes > 0;
+
+export const usePromo = (shopId: number, code: string) =>
+  void db.prepare("UPDATE promos SET uses = uses + 1 WHERE shop_id = ? AND code = ?").run(shopId, normCode(code));
+
+/** Sets a percentage discount (keeping the original as old_price), or restores the original price when percent is null. */
+export function setDiscount(id: number, shopId: number, percent: number | null): boolean {
+  const p = getProduct(id);
+  if (!p || p.shop_id !== shopId || p.price == null) return false;
+  const base = p.old_price ?? p.price;
+  if (percent == null) {
+    db.prepare("UPDATE products SET price = ?, old_price = NULL WHERE id = ?").run(base, id);
+  } else {
+    db.prepare("UPDATE products SET price = ?, old_price = ? WHERE id = ?").run(Math.round(base * (1 - percent / 100)), base, id);
+  }
+  return true;
+}
+
+export const setCategory = (id: number, shopId: number, category: string) =>
+  db.prepare("UPDATE products SET category = ? WHERE id = ? AND shop_id = ?").run(category.trim().slice(0, 30), id, shopId).changes > 0;
+
+export const shopCategories = (shopId: number): string[] =>
+  (db.prepare("SELECT DISTINCT category FROM products WHERE shop_id = ? AND category != '' ORDER BY category").all(shopId) as { category: string }[]).map(
+    (r) => r.category,
+  );
+
+export const shopAdminIds = (shop: Shop): number[] => [
+  shop.tg_id,
+  ...(db.prepare("SELECT tg_id FROM shop_admins WHERE shop_id = ?").all(shop.id) as { tg_id: number }[]).map((r) => r.tg_id),
+];
+
+export function createInvite(shopId: number): string {
+  const token = Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6);
+  db.prepare("INSERT INTO invites (token, shop_id) VALUES (?, ?)").run(token, shopId);
+  return token;
+}
+
+/** Consumes an invite and makes the user an admin of that shop. */
+export function acceptInvite(token: string, tgId: number): Shop | undefined {
+  const inv = db.prepare("SELECT shop_id FROM invites WHERE token = ?").get(token) as { shop_id: number } | undefined;
+  if (!inv) return undefined;
+  db.prepare("DELETE FROM invites WHERE token = ?").run(token);
+  db.prepare("INSERT OR IGNORE INTO shop_admins (shop_id, tg_id) VALUES (?, ?)").run(inv.shop_id, tgId);
+  return getShopById(inv.shop_id);
+}
+
+export const removeAdmin = (shopId: number, tgId: number) =>
+  db.prepare("DELETE FROM shop_admins WHERE shop_id = ? AND tg_id = ?").run(shopId, tgId).changes > 0;

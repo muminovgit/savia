@@ -40,7 +40,7 @@ async function ask(system: string, content: Anthropic.MessageParam["content"], m
 const PRODUCT_SYSTEM = `You write product catalog cards for small sellers in Central Asia.
 From the seller's note (and photo, if any) return ONLY a JSON object:
 {
- "category": string,
+ "category": string,             // short shop section in Uzbek Latin (1-2 words), e.g. "Kurtkalar", "Shimlar", "Koftalar"; reuse an existing category of this shop if one fits exactly
  "price": number|null,            // numeric price exactly as the seller said, null if not given
  "currency": "UZS"|"KZT"|"USD"|"RUB"|...,  // default UZS if unclear
  "attributes": {string:string},   // e.g. color, size, material - only facts from the note/photo
@@ -55,6 +55,7 @@ Descriptions: 2-3 short, natural sentences. Uzbek must be Latin script.`;
 
 export async function generateProduct(input: {
   text: string;
+  categories?: string[];
   images?: { base64: string; mediaType: "image/jpeg" | "image/png" | "image/webp" | "image/gif" }[];
 }): Promise<GeneratedProduct> {
   if (!client) return mockProduct(input.text);
@@ -62,7 +63,7 @@ export async function generateProduct(input: {
   for (const img of input.images ?? []) {
     content.push({ type: "image", source: { type: "base64", media_type: img.mediaType, data: img.base64 } });
   }
-  content.push({ type: "text", text: `Seller's note: ${input.text || "(no text, use the photo)"}` });
+  content.push({ type: "text", text: `Seller's note: ${input.text || "(no text, use the photo)"}${input.categories?.length ? `\nExisting categories of this shop: ${input.categories.join(", ")}` : ""}` });
   return extractJson<GeneratedProduct>(await ask(PRODUCT_SYSTEM, content));
 }
 
