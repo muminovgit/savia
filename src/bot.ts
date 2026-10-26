@@ -1,10 +1,11 @@
 import { Bot, InlineKeyboard } from "grammy";
+import type { Api } from "grammy";
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, listOrders, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
+import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, getShopByChannel, listOrders, productBySource, setShopChannel, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
 import { enhance, hasRemoveBg, whiteBackground } from "./image.js";
 import { generateProduct } from "./ai.js";
-import type { Order, OrderStatus } from "./db.js";
+import type { Order, OrderStatus, Shop } from "./db.js";
 import { setOrderNotifier, setSellerNotifier } from "./server.js";
 
 const PUBLIC_URL = (
@@ -22,7 +23,7 @@ export function createBot(token: string) {
   bot.command("start", async (ctx) => {
     const shop = shopOf(ctx);
     await ctx.reply(
-      `Salom! Men Savia botman.\n\nMahsulot qo'shish: rasm yuboring va izohga yozing, masalan:\n"qizil ko'ylak, 42-razmer, 180000 so'm"\n\nAI tavsif yozadi va o'zbek/rus/ingliz tillariga tarjima qiladi.\n\nDo'koningiz: ${link(shop.slug)}\n\nBuyruqlar:\n/products — mahsulotlar\n/name Do'kon nomi\n/contact @username yoki +998...\n/payment To'lov ma'lumoti (karta raqami va h.k.)\n/orders — buyurtmalar\n/shop — do'kon linki`,
+      `Salom! Men Savia botman.\n\nMahsulot qo'shish: rasm yuboring va izohga yozing, masalan:\n"qizil ko'ylak, 42-razmer, 180000 so'm"\n\nAI tavsif yozadi va o'zbek/rus/ingliz tillariga tarjima qiladi.\n\nDo'koningiz: ${link(shop.slug)}\n\nBuyruqlar:\n/products — mahsulotlar\n/name Do'kon nomi\n/contact @username yoki +998...\n/channel — kanalni ulash\n/payment To'lov ma'lumoti (karta raqami va h.k.)\n/orders — buyurtmalar\n/shop — do'kon linki`,
     );
   });
 
@@ -41,6 +42,12 @@ export function createBot(token: string) {
     updateShop(shopOf(ctx).id, { contact });
     await ctx.reply("Aloqa ma'lumoti saqlandi.");
   });
+
+  bot.command("channel", (ctx) =>
+    ctx.reply(
+      "Telegram kanalingizni ulash (postlar avtomatik katalogga o'tadi):\n\n1. Kanalingiz → Administratorlar → Administrator qo'shish → @savia_shop_bot\n2. Kanaldagi istalgan postni shu botga FORWARD qiling.\n\nBot kanalni ulaydi. Keyin kanalga qo'ygan har yangi rasmli post (razmer, narx, kod bilan) avtomatik mahsulot bo'ladi. Eski postlarni ham forward qilib qo'shishingiz mumkin.",
+    ),
+  );
 
   bot.command("payment", async (ctx) => {
     const payment = ctx.match.trim().slice(0, 200);
@@ -80,7 +87,7 @@ export function createBot(token: string) {
     if (ok) await ctx.editMessageText("O'chirildi.");
   });
 
-  type Img = { id: string; mime: string };
+  type Img = { id: string; mime: string; srcMsg?: number };
   const MEDIA = ["image/jpeg", "image/png", "image/webp", "image/gif"] as const;
   const MAX_IMAGES = 6;
   const MAX_AI_IMAGES = 4;
@@ -112,13 +119,12 @@ export function createBot(token: string) {
     await ctx.reply(failed ? `Oq fon: ${out.length - failed}/${out.length} rasm tayyor.` : `Oq fon tayyor (#${p.id}). Katalog: ${link(shop.slug)}`);
   });
 
-  async function createFromMessage(ctx: any, text: string, files: Img[]) {
-    const shop = shopOf(ctx);
-    await ctx.replyWithChatAction("typing");
+  /** Downloads the photos, runs the AI and stores the product. Shared by DM uploads and channel posts. */
+  async function buildProduct(api: Api, shop: Shop, text: string, files: Img[], src?: { chat: number; msg: number }) {
     const photos: string[] = [];
     const images: NonNullable<Parameters<typeof generateProduct>[0]["images"]> = [];
     for (const f of files.slice(0, MAX_IMAGES)) {
-      const file = await ctx.api.getFile(f.id);
+      const file = await api.getFile(f.id);
       const res = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
       const buf = Buffer.from(await res.arrayBuffer());
       if (buf.length > MAX_PHOTO_BYTES) continue;
@@ -130,13 +136,26 @@ export function createBot(token: string) {
       photos.push(name);
       if (images.length < MAX_AI_IMAGES) images.push({ base64: buf.toString("base64"), mediaType });
     }
+    const g = await generateProduct({ text, images });
+    return addProduct(
+      { shop_id: shop.id, category: g.category, price: g.price, currency: g.currency || "UZS", attributes: g.attributes ?? {}, translations: g.translations, photos },
+      src,
+    );
+  }
+
+  async function createFromMessage(ctx: any, text: string, files: Img[]) {
+    const shop = shopOf(ctx);
+    const origin = ctx.message?.forward_origin;
+    const srcMsg = files.map((f) => f.srcMsg).filter((m): m is number => m != null);
+    const src = origin?.type === "channel" && shop.channel_id === origin.chat.id && srcMsg.length ? { chat: origin.chat.id as number, msg: Math.min(...srcMsg) } : undefined;
+    if (src && productBySource(src.chat, src.msg)) return void ctx.reply("Bu post allaqachon katalogda bor.");
+    await ctx.replyWithChatAction("typing");
     try {
-      const g = await generateProduct({ text, images });
-      const p = addProduct({ shop_id: shop.id, category: g.category, price: g.price, currency: g.currency || "UZS", attributes: g.attributes ?? {}, translations: g.translations, photos });
+      const p = await buildProduct(ctx.api, shop, text, files, src);
       const uz = p.translations.uz;
       await ctx.reply(
-        `Qo'shildi (#${p.id}, ${photos.length} ta rasm):\n\n${uz.title}\n${uz.description}\nNarxi: ${p.price ?? "ko'rsatilmagan"} ${p.currency}\n\nKatalog: ${link(shop.slug)}`,
-        { reply_markup: productKeyboard(p.id, photos.length > 0) },
+        `Qo'shildi (#${p.id}, ${p.photos.length} ta rasm):\n\n${uz.title}\n${uz.description}\nNarxi: ${p.price ?? "ko'rsatilmagan"} ${p.currency}\n\nKatalog: ${link(shop.slug)}`,
+        { reply_markup: productKeyboard(p.id, p.photos.length > 0) },
       );
     } catch (e) {
       console.error("product generation failed", e);
@@ -145,37 +164,87 @@ export function createBot(token: string) {
   }
 
   // Telegram sends an album as separate messages sharing media_group_id; merge them into one product.
-  const albums = new Map<string, { files: Img[]; caption: string; ctx: any; timer?: NodeJS.Timeout }>();
-  function collect(ctx: any, file: Img) {
-    const caption: string = ctx.message.caption ?? "";
-    const gid: string | undefined = ctx.message.media_group_id;
-    if (!gid) return createFromMessage(ctx, caption, [file]);
-    let g = albums.get(gid);
-    if (!g) albums.set(gid, (g = { files: [], caption: "", ctx }));
+  const albums = new Map<string, { files: Img[]; caption: string; timer?: NodeJS.Timeout }>();
+  function collect(key: string | undefined, caption: string, file: Img, done: (text: string, files: Img[]) => void) {
+    if (!key) return done(caption, [file]);
+    let g = albums.get(key);
+    if (!g) albums.set(key, (g = { files: [], caption: "" }));
     g.files.push(file);
     if (caption) g.caption = caption;
     clearTimeout(g.timer);
     g.timer = setTimeout(() => {
-      albums.delete(gid);
-      void createFromMessage(g!.ctx, g!.caption, g!.files);
+      albums.delete(key);
+      done(g!.caption, g!.files);
     }, 1500);
   }
 
+  const originMsg = (m: any): number | undefined => (m.forward_origin?.type === "channel" ? m.forward_origin.message_id : undefined);
+
+  // Linking a channel: the sender forwards any post from it, and must be an admin of that channel.
+  bot.on("message:forward_origin", async (ctx, next) => {
+    const o = ctx.message.forward_origin;
+    if (o.type !== "channel") return next();
+    const shop = shopOf(ctx);
+    if (shop.channel_id !== o.chat.id) {
+      const other = getShopByChannel(o.chat.id);
+      if (other && other.id !== shop.id) return void ctx.reply("Bu kanal boshqa do'konga ulangan.");
+      let ok = false;
+      try {
+        const m = await ctx.api.getChatMember(o.chat.id, ctx.from.id);
+        ok = m.status === "creator" || m.status === "administrator";
+      } catch {
+        /* bot is not in the channel */
+      }
+      if (!ok) {
+        return void ctx.reply("Kanalni ulash uchun avval botni kanalga ADMINISTRATOR qilib qo'shing (siz ham kanal admini bo'lishingiz kerak), so'ng postni qayta forward qiling. Yo'riqnoma: /channel");
+      }
+      setShopChannel(shop.id, o.chat.id);
+      await ctx.reply(`Kanal ulandi: ${o.chat.title}\nEndi kanalga qo'yiladigan yangi postlar avtomatik katalogga qo'shiladi.\nEski postlarni shu yerga forward qilsangiz ham qo'shiladi.`);
+    }
+    return next();
+  });
+
   bot.on("message:photo", (ctx) => {
     const sizes = ctx.message.photo;
-    return collect(ctx, { id: sizes[sizes.length - 1].file_id, mime: "image/jpeg" });
+    const file = { id: sizes[sizes.length - 1].file_id, mime: "image/jpeg", srcMsg: originMsg(ctx.message) };
+    return collect(ctx.message.media_group_id, ctx.message.caption ?? "", file, (t, f) => void createFromMessage(ctx, t, f));
   });
 
   bot.on("message:document", (ctx) => {
     const d = ctx.message.document;
     if (!d.mime_type?.startsWith("image/")) return ctx.reply("Faqat rasm yuboring (jpg, png, webp).");
-    return collect(ctx, { id: d.file_id, mime: d.mime_type });
+    const file = { id: d.file_id, mime: d.mime_type, srcMsg: originMsg(ctx.message) };
+    return collect(ctx.message.media_group_id, ctx.message.caption ?? "", file, (t, f) => void createFromMessage(ctx, t, f));
+  });
+
+  // New posts in a linked channel become products automatically (the bot must be a channel admin).
+  bot.on("channel_post", (ctx) => {
+    const shop = getShopByChannel(ctx.chat.id);
+    const m = ctx.channelPost;
+    if (!shop) return;
+    const photo = m.photo?.[m.photo.length - 1];
+    const doc = m.document?.mime_type?.startsWith("image/") ? m.document : undefined;
+    const fileId = photo?.file_id ?? doc?.file_id;
+    if (!fileId) return;
+    const file = { id: fileId, mime: photo ? "image/jpeg" : doc!.mime_type!, srcMsg: m.message_id };
+    const chat = ctx.chat.id;
+    collect(m.media_group_id ? `${chat}:${m.media_group_id}` : undefined, m.caption ?? "", file, (text, files) => {
+      const msg = Math.min(...files.map((f) => f.srcMsg!));
+      if (productBySource(chat, msg)) return;
+      buildProduct(ctx.api, shop, text, files, { chat, msg })
+        .then((p) =>
+          bot.api.sendMessage(shop.tg_id, `Kanaldan yangi mahsulot qo'shildi (#${p.id}): ${p.translations.uz.title}\nKatalog: ${link(shop.slug)}`, {
+            reply_markup: productKeyboard(p.id, p.photos.length > 0),
+          }),
+        )
+        .catch((e) => console.error("channel import failed", e));
+    });
   });
 
   bot.on("message:text", (ctx) => {
     if (ctx.message.text.startsWith("/")) return;
     return ctx.reply(
-      "Mahsulot qo'shish uchun rasm yuboring va narx/tavsifni rasm izohiga (caption) yozing.\nMasalan: rasm + \"erkaklar kurtkasi, 500 000 so'm\".\nMahsulotlar: /products",
+      "Mahsulot qo'shish uchun rasm yuboring va narx/tavsifni rasm izohiga (caption) yozing.\nMasalan: rasm + \"erkaklar kurtkasi, 500 000 so'm\".\nKanalingiz bo'lsa: /channel\nMahsulotlar: /products",
     );
   });
 

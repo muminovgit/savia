@@ -16,6 +16,7 @@ export interface Shop {
   name: string;
   contact: string;
   payment: string;
+  channel_id: number | null;
 }
 
 export interface Product {
@@ -95,12 +96,12 @@ export function updateShop(id: number, fields: Partial<Pick<Shop, "name" | "cont
   if (fields.contact !== undefined) db.prepare("UPDATE shops SET contact = ? WHERE id = ?").run(fields.contact, id);
 }
 
-export function addProduct(p: Omit<Product, "id">): Product {
+export function addProduct(p: Omit<Product, "id">, src?: { chat: number; msg: number }): Product {
   const id = db
     .prepare(
-      "INSERT INTO products (shop_id, category, price, currency, attributes, translations, photo) VALUES (?,?,?,?,?,?,?)",
+      "INSERT INTO products (shop_id, category, price, currency, attributes, translations, photo, src_chat, src_msg) VALUES (?,?,?,?,?,?,?,?,?)",
     )
-    .run(p.shop_id, p.category, p.price, p.currency, JSON.stringify(p.attributes), JSON.stringify(p.translations), p.photos.length ? JSON.stringify(p.photos) : null)
+    .run(p.shop_id, p.category, p.price, p.currency, JSON.stringify(p.attributes), JSON.stringify(p.translations), p.photos.length ? JSON.stringify(p.photos) : null, src?.chat ?? null, src?.msg ?? null)
     .lastInsertRowid;
   return getProduct(Number(id))!;
 }
@@ -220,3 +221,26 @@ export const listOrders = (shopId: number, limit = 10) =>
 export function setOrderStatus(id: number, shopId: number, status: OrderStatus): boolean {
   return db.prepare("UPDATE orders SET status = ? WHERE id = ? AND shop_id = ?").run(status, id, shopId).changes > 0;
 }
+
+// --- channel import ---
+for (const ddl of [
+  "ALTER TABLE shops ADD COLUMN channel_id INTEGER",
+  "ALTER TABLE products ADD COLUMN src_chat INTEGER",
+  "ALTER TABLE products ADD COLUMN src_msg INTEGER",
+]) {
+  try {
+    db.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
+}
+db.exec("CREATE UNIQUE INDEX IF NOT EXISTS products_src ON products(src_chat, src_msg) WHERE src_chat IS NOT NULL");
+
+export const getShopByChannel = (channelId: number) =>
+  db.prepare("SELECT * FROM shops WHERE channel_id = ?").get(channelId) as Shop | undefined;
+
+export const setShopChannel = (shopId: number, channelId: number | null) =>
+  void db.prepare("UPDATE shops SET channel_id = ? WHERE id = ?").run(channelId, shopId);
+
+export const productBySource = (chat: number, msg: number) =>
+  db.prepare("SELECT id FROM products WHERE src_chat = ? AND src_msg = ?").get(chat, msg) as { id: number } | undefined;

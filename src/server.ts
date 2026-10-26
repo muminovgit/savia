@@ -4,11 +4,11 @@ import type { Lang, Order, Product, Shop } from "./db.js";
 import { answerQuestion } from "./ai.js";
 
 const UI: Record<Lang, Record<string, string>> = {
-  uz: { ask: "Savol bering", send: "Yuborish", contact: "Sotuvchiga yozish", empty: "Hozircha mahsulot yo'q", hint: "Masalan: razmeri bormi?", back: "Katalog", price: "Narxi", agree: "Narxi kelishiladi",
+  uz: { ask: "Savol bering", send: "Yuborish", contact: "Sotuvchiga yozish", empty: "Hozircha mahsulot yo'q", hint: "Masalan: razmeri bormi?", back: "Katalog", price: "Narxi", agree: "Narxi kelishiladi", search: "Qidirish: nomi, kod, razmer",
     add: "Savatga qo'shish", added: "Savatga qo'shildi ✓", cart: "Savat", cartEmpty: "Savat bo'sh", total: "Jami", checkout: "Buyurtma berish", name: "Ismingiz", phone: "Telefon raqamingiz", address: "Yetkazish manzili", note: "Izoh (ixtiyoriy)", sending: "Yuborilmoqda...", placed: "Buyurtma qabul qilindi", thanks: "Sotuvchi tez orada siz bilan bog'lanadi.", pay: "To'lov ma'lumoti", remove: "O'chirish", error: "Xatolik, qayta urinib ko'ring", orderNo: "Buyurtma raqami" },
-  ru: { ask: "Задайте вопрос", send: "Отправить", contact: "Написать продавцу", empty: "Товаров пока нет", hint: "Например: есть ли размер?", back: "Каталог", price: "Цена", agree: "Цена договорная",
+  ru: { ask: "Задайте вопрос", send: "Отправить", contact: "Написать продавцу", empty: "Товаров пока нет", hint: "Например: есть ли размер?", back: "Каталог", price: "Цена", agree: "Цена договорная", search: "Поиск: название, код, размер",
     add: "В корзину", added: "Добавлено ✓", cart: "Корзина", cartEmpty: "Корзина пуста", total: "Итого", checkout: "Оформить заказ", name: "Ваше имя", phone: "Ваш телефон", address: "Адрес доставки", note: "Комментарий (необязательно)", sending: "Отправка...", placed: "Заказ принят", thanks: "Продавец скоро свяжется с вами.", pay: "Данные для оплаты", remove: "Удалить", error: "Ошибка, попробуйте снова", orderNo: "Номер заказа" },
-  en: { ask: "Ask a question", send: "Send", contact: "Message the seller", empty: "No products yet", hint: "e.g. is it available in size M?", back: "Catalog", price: "Price", agree: "Price on request",
+  en: { ask: "Ask a question", send: "Send", contact: "Message the seller", empty: "No products yet", hint: "e.g. is it available in size M?", back: "Catalog", price: "Price", agree: "Price on request", search: "Search: name, code, size",
     add: "Add to cart", added: "Added ✓", cart: "Cart", cartEmpty: "Your cart is empty", total: "Total", checkout: "Place order", name: "Your name", phone: "Your phone", address: "Delivery address", note: "Note (optional)", sending: "Sending...", placed: "Order received", thanks: "The seller will contact you soon.", pay: "Payment details", remove: "Remove", error: "Something went wrong, try again", orderNo: "Order number" },
 };
 
@@ -66,11 +66,12 @@ export function createServer() {
       .map((p) => {
         const t = p.translations[lang];
         const img = p.photos[0] ? `<img loading="lazy" src="/photos/${esc(p.photos[0])}" alt="">` : `<div class="ph"></div>`;
-        return `<a class="card" href="/s/${esc(shop.slug)}/p/${p.id}?lang=${lang}">${img}<div>${esc(t.title)}<div class="price">${esc(priceText(p, lang))}</div></div></a>`;
+        const hay = [...Object.values(p.translations).map((x) => x.title), p.category, ...Object.values(p.attributes)].join(" ").toLowerCase();
+        return `<a class="card" data-s="${esc(hay)}" href="/s/${esc(shop.slug)}/p/${p.id}?lang=${lang}">${img}<div>${esc(t.title)}<div class="price">${esc(priceText(p, lang))}</div></div></a>`;
       })
       .join("");
     res.send(
-      page(shop.name, `${header(shop, lang, `/s/${esc(shop.slug)}`)}<main>${items.length ? `<div class="grid">${cards}</div>` : `<p>${UI[lang].empty}</p>`}</main>`),
+      page(shop.name, `${header(shop, lang, `/s/${esc(shop.slug)}`)}<main>${items.length ? `<input id="sq" placeholder="🔍 ${esc(UI[lang].search)}" style="width:100%;margin-bottom:12px"><div class="grid" id="g">${cards}</div><script>document.getElementById('sq').oninput=e=>{const v=e.target.value.trim().toLowerCase();document.querySelectorAll('#g .card').forEach(c=>{c.style.display=c.dataset.s.includes(v)?'':'none'})}</script>` : `<p>${UI[lang].empty}</p>`}</main>`),
     );
   });
 

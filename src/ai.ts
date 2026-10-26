@@ -50,7 +50,7 @@ From the seller's note (and photo, if any) return ONLY a JSON object:
    "en": {"title": string, "description": string}
  }
 }
-Rules: if a photo is given, trust it for WHAT the product is. If there is no photo and the note is a short or ambiguous word, do NOT guess what the product is: use the seller's own wording as the title and keep the description minimal. Several photos are different views or colors of the same product. Never invent facts (sizes, materials, prices, delivery) that the seller did not give or the photo does not clearly show.
+Telegram-channel posts often look like \"Razmer 46-56(M-3XL) / Narxi 745.000 / Code #MO8853-1 / Buyurtma uchun @manager +998...\". In prices, dots, commas and spaces are thousands separators (745.000 = 745000). Put the product code in attributes.code and the size or size range in attributes.size. Ignore ordering instructions, contact handles and phone numbers (never put them in the description).\nRules: if a photo is given, trust it for WHAT the product is. If there is no photo and the note is a short or ambiguous word, do NOT guess what the product is: use the seller's own wording as the title and keep the description minimal. Several photos are different views or colors of the same product. Never invent facts (sizes, materials, prices, delivery) that the seller did not give or the photo does not clearly show.
 Descriptions: 2-3 short, natural sentences. Uzbek must be Latin script.`;
 
 export async function generateProduct(input: {
