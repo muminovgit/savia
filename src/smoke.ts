@@ -127,5 +127,19 @@ assert.deepEqual(db.shopAdminIds(shop), [1, 555]);
 assert.equal(db.getOrCreateShop(555, "Manager").id, shop.id);
 assert.ok(db.removeAdmin(shop.id, 555));
 
+// --- buyers / visit ---
+assert.deepEqual(await (await post("/api/visit", { slug: shop.slug }, { "x-tg-init": initData({ id: 901, first_name: "Vali", allows_write_to_pm: true }) })).json(), { ok: true });
+assert.deepEqual(await (await post("/api/visit", { slug: shop.slug }, { "x-tg-init": "hash=00" })).json(), { ok: false });
+await post("/api/visit", { slug: shop.slug }, { "x-tg-init": initData({ id: 902, first_name: "Sardor" }) }); // opened, but did not allow messages
+db.upsertBuyer(shop.id, 903, "Bot user", true);
+assert.deepEqual(db.broadcastTargets(shop.id).sort(), [901, 903]);
+db.markBuyerBlocked(shop.id, 903);
+assert.deepEqual(db.broadcastTargets(shop.id), [901]);
+db.upsertBuyer(shop.id, 903, "", true); // started the bot again
+assert.equal(db.broadcastTargets(shop.id).length, 2);
+assert.equal(db.broadcastsToday(shop.id), 0);
+db.logBroadcast(shop.id, 2, 0);
+assert.equal(db.broadcastsToday(shop.id), 1);
+
 srv.close();
 console.log("smoke ok");

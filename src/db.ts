@@ -467,3 +467,54 @@ export function acceptInvite(token: string, tgId: number): Shop | undefined {
 
 export const removeAdmin = (shopId: number, tgId: number) =>
   db.prepare("DELETE FROM shop_admins WHERE shop_id = ? AND tg_id = ?").run(shopId, tgId).changes > 0;
+
+// --- buyers & broadcasts ---
+db.exec(`
+CREATE TABLE IF NOT EXISTS buyers (
+  shop_id INTEGER NOT NULL REFERENCES shops(id),
+  tg_id INTEGER NOT NULL,
+  name TEXT NOT NULL DEFAULT '',
+  can_write INTEGER NOT NULL DEFAULT 0,
+  blocked INTEGER NOT NULL DEFAULT 0,
+  first_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  last_seen TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (shop_id, tg_id)
+);
+CREATE TABLE IF NOT EXISTS broadcasts (
+  id INTEGER PRIMARY KEY,
+  shop_id INTEGER NOT NULL,
+  sent INTEGER NOT NULL DEFAULT 0,
+  failed INTEGER NOT NULL DEFAULT 0,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+`);
+
+/** Remembers a buyer. canWrite=true means the bot may message them (they started the bot or allowed it in the Mini App). */
+export function upsertBuyer(shopId: number, tgId: number, name: string, canWrite?: boolean) {
+  db.prepare(
+    `INSERT INTO buyers (shop_id, tg_id, name, can_write) VALUES (?,?,?,?)
+     ON CONFLICT(shop_id, tg_id) DO UPDATE SET
+       name = CASE WHEN excluded.name != '' THEN excluded.name ELSE buyers.name END,
+       last_seen = CURRENT_TIMESTAMP,
+       can_write = CASE WHEN ? = 1 THEN 1 ELSE buyers.can_write END,
+       blocked = CASE WHEN ? = 1 THEN 0 ELSE buyers.blocked END`,
+  ).run(shopId, tgId, name, canWrite ? 1 : 0, canWrite ? 1 : 0, canWrite ? 1 : 0);
+}
+
+export const broadcastTargets = (shopId: number) =>
+  (db.prepare("SELECT tg_id FROM buyers WHERE shop_id = ? AND can_write = 1 AND blocked = 0").all(shopId) as { tg_id: number }[]).map((r) => r.tg_id);
+
+export const buyerCounts = (shopId: number) =>
+  db.prepare("SELECT COUNT(*) AS total, SUM(can_write = 1 AND blocked = 0) AS reachable FROM buyers WHERE shop_id = ?").get(shopId) as {
+    total: number;
+    reachable: number | null;
+  };
+
+export const markBuyerBlocked = (shopId: number, tgId: number) =>
+  void db.prepare("UPDATE buyers SET blocked = 1 WHERE shop_id = ? AND tg_id = ?").run(shopId, tgId);
+
+export const broadcastsToday = (shopId: number) =>
+  (db.prepare("SELECT COUNT(*) AS n FROM broadcasts WHERE shop_id = ? AND created_at > datetime('now', '-1 day')").get(shopId) as { n: number }).n;
+
+export const logBroadcast = (shopId: number, sent: number, failed: number) =>
+  void db.prepare("INSERT INTO broadcasts (shop_id, sent, failed) VALUES (?,?,?)").run(shopId, sent, failed);

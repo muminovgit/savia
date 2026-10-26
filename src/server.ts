@@ -12,6 +12,7 @@ import {
   getShopById,
   getShopBySlug,
   isSoldOut,
+  upsertBuyer,
   listProducts,
   logQuestion,
   quote,
@@ -29,7 +30,7 @@ export const esc = (s: unknown) =>
 const asLang = (v: unknown): Lang => (LANGS.includes(v as Lang) ? (v as Lang) : "uz");
 
 /** Validates Telegram Mini App initData (HMAC with the bot token) and returns the Telegram user. */
-export function validateInitData(initData: string | undefined, botToken: string | undefined): { id: number; name: string } | null {
+export function validateInitData(initData: string | undefined, botToken: string | undefined): { id: number; name: string; canWrite: boolean } | null {
   if (!initData || !botToken) return null;
   try {
     const params = new URLSearchParams(initData);
@@ -43,7 +44,7 @@ export function validateInitData(initData: string | undefined, botToken: string 
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) return null;
     if (Date.now() / 1000 - Number(params.get("auth_date") ?? 0) > 86400) return null;
     const user = JSON.parse(params.get("user") ?? "null");
-    return user?.id ? { id: Number(user.id), name: [user.first_name, user.last_name].filter(Boolean).join(" ") } : null;
+    return user?.id ? { id: Number(user.id), name: [user.first_name, user.last_name].filter(Boolean).join(" "), canWrite: user.allows_write_to_pm === true } : null;
   } catch {
     return null;
   }
@@ -136,6 +137,14 @@ export function createServer() {
     return { items };
   };
 
+  /** Remembers a Mini App visitor (verified Telegram identity only) so the seller can reach them later. */
+  app.post("/api/visit", (req, res) => {
+    const shop = getShopBySlug(String(req.body?.slug ?? ""));
+    const user = validateInitData(req.get("x-tg-init") ?? undefined, process.env.BOT_TOKEN);
+    if (shop && user) upsertBuyer(shop.id, user.id, user.name, user.canWrite);
+    res.json({ ok: !!(shop && user) });
+  });
+
   app.post("/api/quote", (req, res) => {
     const shop = getShopBySlug(String(req.body?.slug ?? ""));
     if (!shop) return void res.status(400).json({ error: "bad request" });
@@ -175,6 +184,7 @@ export function createServer() {
       return void res.status(400).json({ error: "min_order", min: shop.min_order, currency: q.currency });
     }
     const buyer = validateInitData(req.get("x-tg-init") ?? undefined, process.env.BOT_TOKEN);
+    if (buyer) upsertBuyer(shop.id, buyer.id, buyer.name, buyer.canWrite);
     let order: Order;
     try {
       order = createOrder(

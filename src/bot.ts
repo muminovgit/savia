@@ -2,7 +2,7 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DATA_DIR, acceptInvite, createInvite, getPromo, getShopBySlug, listPromos, removeAdmin, savePromo, setCategory, setDiscount, setPromoActive, shopAdminIds, shopBanners, shopCategories, shopPhones, isSoldOut, markButton, setStock, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, getShopByChannel, listOrders, productBySource, setShopChannel, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
+import { DATA_DIR, broadcastTargets, broadcastsToday, buyerCounts, logBroadcast, markBuyerBlocked, upsertBuyer, acceptInvite, createInvite, getPromo, getShopBySlug, listPromos, removeAdmin, savePromo, setCategory, setDiscount, setPromoActive, shopAdminIds, shopBanners, shopCategories, shopPhones, isSoldOut, markButton, setStock, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, getShopByChannel, listOrders, productBySource, setShopChannel, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
 import { enhance, hasRemoveBg, whiteBackground } from "./image.js";
 import { generateProduct } from "./ai.js";
 import type { Order, OrderStatus, Product, Shop } from "./db.js";
@@ -57,6 +57,7 @@ export function createBot(token: string) {
     "Do'kon: /name, /about, /contact, /phones, /address, /banner",
     "Savdo: /products, /stock, /discount, /category, /promo, /delivery, /minorder, /payment",
     "Buyurtmalar: /orders",
+    "Rassilka: /broadcast (xaridorlarga xabar), /buyers",
     "Jamoa: /invite (menejer qo'shish), /admins",
     "Do'kon linki: /shop",
   ].join("\n");
@@ -71,6 +72,7 @@ export function createBot(token: string) {
       // A buyer opened a shop link: show the Mini App
       const target = getShopBySlug(payload.split("__")[0]);
       if (target) {
+        upsertBuyer(target.id, ctx.from!.id, ctx.from!.first_name, true); // started the bot: we may message them
         const url = `${PUBLIC_URL}/s/${target.slug}`;
         const kb = url.startsWith("https://") ? new InlineKeyboard().webApp(`🛍 ${target.name}`, url) : new InlineKeyboard().url(`🛍 ${target.name}`, url);
         return void ctx.reply(`${target.name} do'koniga xush kelibsiz!`, { reply_markup: kb });
@@ -189,6 +191,72 @@ export function createBot(token: string) {
       return void ctx.reply(removeAdmin(shop.id, Number(rm[1])) ? "Menejer o'chirildi." : "Topilmadi.");
     }
     await ctx.reply(`Egasi: ${shop.tg_id}\nMenejerlar: ${shopAdminIds(shop).slice(1).join(", ") || "yo'q"}\n\nQo'shish: /invite, o'chirish: /admins remove <id>`);
+  });
+
+  // --- broadcasts: the seller previews and confirms, sending runs in the background ---
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  const MAX_BROADCASTS_PER_DAY = 3;
+  const pendingBroadcast = new Map<number, { shopId: number; text: string; photo?: string }>();
+
+  async function previewBroadcast(ctx: any, text: string, photo?: string) {
+    const shop = shopOf(ctx);
+    const body = text.trim().slice(0, 900);
+    if (!body && !photo) {
+      return void ctx.reply("Masalan: /broadcast Yangi kolleksiya keldi! Barcha kurtkalarga -20%.\nRasm bilan: rasm yuboring va izohga /broadcast matn yozing.");
+    }
+    const targets = broadcastTargets(shop.id).length;
+    if (!targets) {
+      return void ctx.reply("Hozircha xabar yuborish mumkin bo'lgan xaridor yo'q. Xaridor do'konda buyurtma bergach yoki botni /start qilgach ro'yxatga tushadi (/buyers).");
+    }
+    if (broadcastsToday(shop.id) >= MAX_BROADCASTS_PER_DAY) return void ctx.reply(`Bir kunda eng ko'pi ${MAX_BROADCASTS_PER_DAY} ta rassilka mumkin. Ertaga urinib ko'ring.`);
+    pendingBroadcast.set(ctx.from.id, { shopId: shop.id, text: body, photo });
+    const kb = new InlineKeyboard().text(`✅ Yuborish (${targets} ta)`, "bc:send").text("Bekor qilish", "bc:cancel");
+    const note = `\n\n— Xabar shunday ko'rinadi. ${targets} ta xaridorga yuboriladi.`;
+    if (photo) await ctx.replyWithPhoto(photo, { caption: body + note, reply_markup: kb });
+    else await ctx.reply(body + note, { reply_markup: kb });
+  }
+
+  async function runBroadcast(shop: Shop, b: { text: string; photo?: string }, adminId: number) {
+    const kb = new InlineKeyboard().url("🛍 Do'konni ochish", link(shop.slug));
+    let sent = 0;
+    let failed = 0;
+    for (const id of broadcastTargets(shop.id)) {
+      try {
+        if (b.photo) await bot.api.sendPhoto(id, b.photo, { caption: b.text, reply_markup: kb });
+        else await bot.api.sendMessage(id, b.text, { reply_markup: kb });
+        sent++;
+      } catch (e: any) {
+        failed++;
+        if (e?.error_code === 403 || e?.error_code === 400) markBuyerBlocked(shop.id, id); // blocked the bot or never allowed messages
+        else if (e?.error_code === 429) await sleep((e.parameters?.retry_after ?? 3) * 1000);
+      }
+      await sleep(60); // stay far below Telegram's ~30 messages/second limit
+    }
+    logBroadcast(shop.id, sent, failed);
+    await bot.api.sendMessage(adminId, `Rassilka tugadi: ${sent} ta yuborildi, ${failed} ta yetib bormadi.`).catch(() => undefined);
+  }
+
+  bot.command("broadcast", (ctx) => previewBroadcast(ctx, ctx.match));
+
+  bot.command("buyers", async (ctx) => {
+    const c = buyerCounts(shopOf(ctx).id);
+    await ctx.reply(`Xaridorlar: ${c.total}\nXabar yuborish mumkin: ${c.reachable ?? 0}\n\nRassilka: /broadcast matn`);
+  });
+
+  bot.callbackQuery("bc:cancel", async (ctx) => {
+    pendingBroadcast.delete(ctx.from.id);
+    await ctx.answerCallbackQuery("Bekor qilindi");
+    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => undefined);
+  });
+
+  bot.callbackQuery("bc:send", async (ctx) => {
+    const p = pendingBroadcast.get(ctx.from.id);
+    const shop = shopOf(ctx);
+    if (!p || p.shopId !== shop.id) return void ctx.answerCallbackQuery({ text: "Eskirgan. Qaytadan /broadcast yozing.", show_alert: true });
+    pendingBroadcast.delete(ctx.from.id);
+    await ctx.answerCallbackQuery("Yuborilmoqda...");
+    await ctx.editMessageReplyMarkup({ reply_markup: new InlineKeyboard() }).catch(() => undefined);
+    void runBroadcast(shop, p, ctx.from.id); // not awaited: a long send must not block other updates
   });
 
   bot.command("channel", (ctx) =>
@@ -400,6 +468,9 @@ export function createBot(token: string) {
 
   bot.on("message:photo", async (ctx) => {
     const sizes = ctx.message.photo;
+    if (/^\/broadcast\b/i.test(ctx.message.caption ?? "")) {
+      return previewBroadcast(ctx, (ctx.message.caption ?? "").replace(/^\/broadcast\s*/i, ""), sizes[sizes.length - 1].file_id);
+    }
     if (/^\/banner\b/i.test(ctx.message.caption ?? "")) {
       const shop = shopOf(ctx);
       const have = shopBanners(shop);

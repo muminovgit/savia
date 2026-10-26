@@ -232,6 +232,8 @@ ${p.sizes.length ? `<div class="sizes">${p.sizes.map((s) => `<button class="sz $
     S.done = r.j;
     render();
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred("success");
+    // ask once for permission to message the buyer (order updates, news from the shop)
+    try { if (tg && tg.requestWriteAccess && !(tg.initDataUnsafe.user && tg.initDataUnsafe.user.allows_write_to_pm)) tg.requestWriteAccess(); } catch {}
   }
 
   function render() {
@@ -304,5 +306,6 @@ ${p.sizes.length ? `<div class="sizes">${p.sizes.map((s) => `<button class="sz $
     const m = /__p(\d+)/.exec(startParam);
     if (m && !location.hash) location.hash = "#/p/" + m[1];
     render();
+    if (tg && tg.initData) api("/api/visit", { slug }, { "x-tg-init": tg.initData });
   })();
 })();
