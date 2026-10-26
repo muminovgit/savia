@@ -109,6 +109,12 @@ export function createServer() {
 
   app.get("/healthz", (_req, res) => void res.json({ ok: true }));
 
+  // Public landing page (Uzbek/Russian). The origin is injected so link previews get an absolute image URL.
+  app.get("/", (req, res) => {
+    const origin = `${req.protocol}://${req.get("host")}`;
+    res.type("html").send(readFileSync(`${WEB_DIR}landing.html`, "utf8").replaceAll("__ORIGIN__", esc(origin)));
+  });
+
   // The Mini App shell. /app?slug=... or Telegram's startapp param pick the shop on the client; /s/:slug fixes it on the server.
   const sendShell = (slug: string) => (_req: express.Request, res: express.Response) =>
     void res.type("html").send(loadShell().replace("__SLUG__", esc(slug)));

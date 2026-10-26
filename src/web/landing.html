@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Savia — Telegram kanalingiz onlayn do'konga aylanadi</title>
+<meta name="description" content="Postlaringizdan avtomatik katalog, buyurtma, qoldiq va AI sotuvchi yordamchi. Telegram ichida. Pilot: 1 oy bepul. / Каталог из ваших постов, заказы, остатки и AI-помощник в Telegram.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Savia — Telegram kanalingiz onlayn do'kon / Telegram-канал → онлайн-магазин">
+<meta property="og:description" content="Buyurtma, qoldiq va AI yordamchi. Pilot: 1 oy bepul. / Заказы, остатки и AI-помощник. Пилот: 1 месяц бесплатно.">
+<meta property="og:image" content="__ORIGIN__/static/landing/og.jpg">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%230f766e'/%3E%3Ctext x='32' y='44' font-size='36' font-weight='700' text-anchor='middle' fill='white' font-family='Arial'%3ES%3C/text%3E%3C/svg%3E">
+<script>
+  (function () {
+    var q = new URLSearchParams(location.search).get("lang"), s = null;
+    try { s = localStorage.getItem("lp-lang"); } catch (e) {}
+    var l = q || s || ((navigator.language || "uz").slice(0, 2) === "ru" ? "ru" : "uz");
+    document.documentElement.lang = l === "ru" ? "ru" : "uz";
+  })();
+</script>
+<style>
+:root{--teal:#0f766e;--teal2:#14b8a6;--ink:#10201e;--muted:#5b6b69;--bg:#f5f8f7;--card:#fff;--line:#e2ebe9}
+*{box-sizing:border-box}html{scroll-behavior:smooth}
+body{margin:0;font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;color:var(--ink);background:var(--bg)}
+html[lang=uz] .ru,html[lang=ru] .uz{display:none!important}
+a{color:inherit}.wrap{max-width:1080px;margin:0 auto;padding:0 20px}
+nav{position:sticky;top:0;z-index:10;background:rgba(245,248,247,.9);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+nav .wrap{display:flex;align-items:center;gap:12px;height:60px}.logo{font-weight:800;font-size:22px;letter-spacing:-.5px;text-decoration:none;color:var(--teal);flex:1}
+.lang{display:flex;background:#e5eeec;border-radius:10px;padding:3px}.lang button{border:0;background:none;padding:6px 12px;border-radius:8px;font-weight:700;font-size:13px;color:var(--muted);cursor:pointer}
+html[lang=uz] .lang [data-l=uz],html[lang=ru] .lang [data-l=ru]{background:var(--teal);color:#fff}
+.btn{display:inline-block;background:var(--teal);color:#fff;text-decoration:none;font-weight:700;padding:14px 24px;border-radius:14px;border:0;font-size:16px;cursor:pointer}
+.btn.ghost{background:#fff;color:var(--teal);border:1.5px solid var(--teal)}.btn.sm{padding:9px 16px;font-size:14px;border-radius:11px}
+.hero{background:linear-gradient(135deg,#085a54 0%,#0f766e 45%,#14b8a6 100%);color:#fff;padding:56px 0 0;overflow:hidden}
+.hero .wrap{display:grid;grid-template-columns:1.1fr .9fr;gap:30px;align-items:end}
+.hero h1{font-size:clamp(32px,5vw,52px);line-height:1.08;margin:0 0 16px;letter-spacing:-1px}.hero p{font-size:19px;opacity:.92;margin:0 0 26px;max-width:520px}
+.hero .cta{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:12px}.hero .btn{background:#fff;color:var(--teal)}.hero .btn.ghost{background:transparent;color:#fff;border-color:rgba(255,255,255,.7)}
+.hero small{display:block;opacity:.8;margin-bottom:40px}
+.phones{display:flex;gap:14px;justify-content:center;align-items:flex-end}
+.phone{border:7px solid #0b1f1c;border-radius:34px 34px 0 0;border-bottom:0;overflow:hidden;background:#000;box-shadow:0 20px 50px rgba(0,0,0,.35)}.phone img{display:block;width:100%}
+.phones .phone:nth-child(1){width:42%}.phones .phone:nth-child(2){width:46%;margin-bottom:-30px}
+section{padding:64px 0}h2{font-size:clamp(26px,4vw,36px);line-height:1.15;margin:0 0 12px;letter-spacing:-.6px}.lead{color:var(--muted);font-size:18px;max-width:640px;margin:0 0 32px}
+.steps{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.step{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:22px}
+.step b{display:grid;place-items:center;width:38px;height:38px;border-radius:12px;background:var(--teal);color:#fff;margin-bottom:12px}.step h3{margin:0 0 6px;font-size:18px}.step p{margin:0;color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.feat{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px}
+.feat .i{font-size:26px;margin-bottom:8px}.feat h3{margin:0 0 4px;font-size:17px}.feat p{margin:0;color:var(--muted);font-size:15px}
+.shots{background:#e9f1ef}.shots .row{display:grid;grid-template-columns:repeat(4,1fr);gap:18px}.shots figure{margin:0}
+.shots .phone{border-radius:26px;border-width:6px}.shots figcaption{text-align:center;margin-top:10px;color:var(--muted);font-size:14px}
+.pilot{background:linear-gradient(135deg,#085a54,#0f766e);color:#fff;border-radius:24px;padding:36px;display:grid;grid-template-columns:1.3fr .7fr;gap:24px;align-items:center}
+.pilot h2{color:#fff}.pilot p{opacity:.92;margin:0 0 6px}.pilot ul{margin:12px 0 0;padding-left:20px;opacity:.95}.pilot .btn{background:#fff;color:var(--teal);width:100%;text-align:center}
+details{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:10px}summary{cursor:pointer;font-weight:700}details p{margin:10px 0 0;color:var(--muted)}
+.honest{background:#fff8e6;border:1px solid #f1deb0;border-radius:14px;padding:14px 18px;color:#6b5314;margin-top:18px}
+footer{padding:36px 0 56px;color:var(--muted);text-align:center;font-size:14px}footer a{color:var(--teal);font-weight:700}
+@media(max-width:860px){.hero .wrap{grid-template-columns:1fr}.phones{margin-top:10px}.steps,.grid{grid-template-columns:1fr}.shots .row{grid-template-columns:repeat(2,1fr)}.pilot{grid-template-columns:1fr;padding:26px}}
+</style>
+</head>
+<body>
+<nav><div class="wrap"><a class="logo" href="#">Savia</a>
+<div class="lang"><button data-l="uz">UZ</button><button data-l="ru">RU</button></div>
+<a class="btn sm" href="https://t.me/savia_shop_bot"><span class="uz">Botni ochish</span><span class="ru">Открыть бота</span></a></div></nav>
+
+<header class="hero"><div class="wrap">
+<div>
+<h1><span class="uz">Telegram kanalingiz — onlayn do'konga aylanadi</span><span class="ru">Ваш Telegram-канал превращается в онлайн-магазин</span></h1>
+<p><span class="uz">Postlaringiz o'zi katalogga aylanadi. Mijoz razmer tanlab buyurtma beradi, savollarga AI 24/7 javob beradi, qoldiqni o'zi yuritadi.</span><span class="ru">Ваши посты сами становятся каталогом. Клиент выбирает размер и оформляет заказ, AI отвечает на вопросы 24/7, остатки считаются автоматически.</span></p>
+<div class="cta"><a class="btn" href="https://t.me/savia_shop_bot/shop?startapp=demo"><span class="uz">Demo do'konni ko'rish</span><span class="ru">Посмотреть демо-магазин</span></a>
+<a class="btn ghost" href="https://t.me/savia_shop_bot"><span class="uz">Bepul boshlash</span><span class="ru">Начать бесплатно</span></a></div>
+<small><span class="uz">Pilot dasturi: 1 oy bepul, shartnomasiz.</span><span class="ru">Пилотная программа: 1 месяц бесплатно, без договора.</span></small>
+</div>
+<div class="phones"><div class="phone"><img src="/static/landing/catalog.jpg" alt="Katalog"></div><div class="phone"><img src="/static/landing/product.jpg" alt="Mahsulot"></div></div>
+</div></header>
+
+<section><div class="wrap">
+<h2><span class="uz">3 qadamda ishga tushadi</span><span class="ru">Запуск за 3 шага</span></h2>
+<p class="lead"><span class="uz">Postlaringizni qayta kiritish shart emas. Taxminan 5 daqiqa.</span><span class="ru">Переписывать посты не нужно. Около 5 минут.</span></p>
+<div class="steps">
+<div class="step"><b>1</b><h3><span class="uz">Botni kanalga qo'shing</span><span class="ru">Добавьте бота в канал</span></h3><p><span class="uz">@savia_shop_bot ni kanalingizga administrator qiling.</span><span class="ru">Сделайте @savia_shop_bot администратором канала.</span></p></div>
+<div class="step"><b>2</b><h3><span class="uz">Postlar katalogga aylanadi</span><span class="ru">Посты становятся каталогом</span></h3><p><span class="uz">AI postdagi nom, narx, razmer va kodni o'qiydi. Post tagida «Buyurtma berish» tugmasi paydo bo'ladi.</span><span class="ru">AI читает название, цену, размер и код из поста. Под постом появляется кнопка «Заказать».</span></p></div>
+<div class="step"><b>3</b><h3><span class="uz">Buyurtma sizga keladi</span><span class="ru">Заказы приходят вам</span></h3><p><span class="uz">Mijoz Telegram ichida buyurtma beradi. Siz botda tasdiqlaysiz, mijozga xabar o'zi boradi.</span><span class="ru">Клиент оформляет заказ прямо в Telegram. Вы подтверждаете в боте, клиент получает уведомление.</span></p></div>
+</div></div></section>
+
+<section style="padding-top:0"><div class="wrap">
+<h2><span class="uz">Nimalar bor</span><span class="ru">Что внутри</span></h2><p class="lead"><span class="uz">Kichik do'kondan katta kanalgacha, kerakli hamma narsa bir joyda.</span><span class="ru">От маленького магазина до большого канала — всё нужное в одном месте.</span></p>
+<div class="grid">
+<div class="feat"><div class="i">📣</div><h3><span class="uz">Kanal → katalog</span><span class="ru">Канал → каталог</span></h3><p><span class="uz">Yangi post avtomatik mahsulot bo'ladi: narx, razmer, kod.</span><span class="ru">Новый пост автоматически становится товаром: цена, размер, код.</span></p></div>
+<div class="feat"><div class="i">🤖</div><h3><span class="uz">AI sotuvchi yordamchi</span><span class="ru">AI-помощник продавца</span></h3><p><span class="uz">«46 razmer bormi?» — faqat sizning ma'lumotingizga tayanib javob beradi, bilmasa sizga yo'naltiradi.</span><span class="ru">«Есть 46 размер?» — отвечает только по вашим данным, не знает — передаёт вам.</span></p></div>
+<div class="feat"><div class="i">📦</div><h3><span class="uz">Razmer bo'yicha qoldiq</span><span class="ru">Остатки по размерам</span></h3><p><span class="uz">Tovar tugasa post tagidagi tugma «Tugadi» ga o'zgaradi.</span><span class="ru">Когда товар заканчивается, кнопка под постом меняется на «Нет в наличии».</span></p></div>
+<div class="feat"><div class="i">🛒</div><h3><span class="uz">Savat va buyurtma</span><span class="ru">Корзина и заказы</span></h3><p><span class="uz">Yetkazib berish narxi, minimal buyurtma, promokod. Xaridor ism-telefonni qayta yozmaydi.</span><span class="ru">Стоимость доставки, минимальный заказ, промокод. Клиенту не нужно вводить имя заново.</span></p></div>
+<div class="feat"><div class="i">📲</div><h3><span class="uz">Telegram ichida</span><span class="ru">Прямо в Telegram</span></h3><p><span class="uz">Ilova yoki sayt kerak emas. O'zbek, rus va ingliz tillarida.</span><span class="ru">Не нужно приложение или сайт. На узбекском, русском и английском.</span></p></div>
+<div class="feat"><div class="i">⚙️</div><h3><span class="uz">Sotuvchi paneli</span><span class="ru">Панель продавца</span></h3><p><span class="uz">Narx, chegirma, qoldiq, buyurtmalar va menejerlar — telefondan bir necha bosishda. Xaridorlarga rassilka.</span><span class="ru">Цены, скидки, остатки, заказы и менеджеры — с телефона в пару касаний. Рассылка клиентам.</span></p></div>
+</div></div></section>
+
+<section class="shots"><div class="wrap">
+<h2><span class="uz">Haqiqiy ko'rinishi</span><span class="ru">Как это выглядит</span></h2><p class="lead"><span class="uz">Demo do'kondan olingan ekranlar.</span><span class="ru">Скриншоты демо-магазина.</span></p>
+<div class="row">
+<figure><div class="phone"><img src="/static/landing/catalog.jpg" alt="" loading="lazy"></div><figcaption><span class="uz">Katalog</span><span class="ru">Каталог</span></figcaption></figure>
+<figure><div class="phone"><img src="/static/landing/product.jpg" alt="" loading="lazy"></div><figcaption><span class="uz">Mahsulot va razmer</span><span class="ru">Товар и размеры</span></figcaption></figure>
+<figure><div class="phone"><img src="/static/landing/cart.jpg" alt="" loading="lazy"></div><figcaption><span class="uz">Savat va promokod</span><span class="ru">Корзина и промокод</span></figcaption></figure>
+<figure><div class="phone"><img src="/static/landing/panel-orders.jpg" alt="" loading="lazy"></div><figcaption><span class="uz">Sotuvchi paneli</span><span class="ru">Панель продавца</span></figcaption></figure>
+</div>
+<p style="text-align:center;margin-top:28px"><a class="btn" href="https://t.me/savia_shop_bot/shop?startapp=demo"><span class="uz">Demo do'konni o'zingiz sinab ko'ring</span><span class="ru">Попробуйте демо-магазин сами</span></a></p>
+</div></section>
+
+<section><div class="wrap"><div class="pilot"><div>
+<h2><span class="uz">Pilot dasturi: 1 oy bepul</span><span class="ru">Пилотная программа: 1 месяц бесплатно</span></h2>
+<p><span class="uz">Kanalingizni biz bilan birga ulaymiz va natijani ko'ramiz. Maqsad — sizga haqiqatan foyda bo'lishi.</span><span class="ru">Подключим ваш канал вместе и посмотрим на результат. Цель — чтобы вам это реально помогало.</span></p>
+<ul><li><span class="uz">Shartnoma va oldindan to'lov yo'q</span><span class="ru">Без договора и предоплаты</span></li>
+<li><span class="uz">Ulashda yordam beramiz</span><span class="ru">Поможем с подключением</span></li>
+<li><span class="uz">Pilotdan keyingi narx birga kelishiladi</span><span class="ru">Цену после пилота обсудим вместе</span></li></ul></div>
+<div><a class="btn" href="https://t.me/savia_shop_bot"><span class="uz">Bepul boshlash</span><span class="ru">Начать бесплатно</span></a></div></div></div></section>
+
+<section style="padding-top:0"><div class="wrap">
+<h2><span class="uz">Savollar</span><span class="ru">Вопросы</span></h2>
+<details><summary><span class="uz">Kanalimni ulash xavfsizmi?</span><span class="ru">Безопасно ли подключать канал?</span></summary><p><span class="uz">Bot faqat yangi postlarni o'qiydi va tagiga «Buyurtma berish» tugmasini qo'yadi. Kanalni faqat uning administratori ulay oladi. Xohlagan paytda botni adminlikdan olib tashlasangiz bo'ladi.</span><span class="ru">Бот только читает новые посты и добавляет под ними кнопку «Заказать». Подключить канал может только его администратор. Бота можно в любой момент убрать из админов.</span></p></details>
+<details><summary><span class="uz">Menejerim bor, nimaga kerak?</span><span class="ru">У меня есть менеджер, зачем это?</span></summary><p><span class="uz">Menejer qoladi. Takroriy savollarga («razmer bormi?», «narxi qancha?») AI javob beradi, buyurtmalar esa tayyor ko'rinishda keladi. Menejer murakkab savollarga vaqt ajratadi.</span><span class="ru">Менеджер остаётся. На повторяющиеся вопросы («есть размер?», «сколько стоит?») отвечает AI, а заказы приходят в готовом виде. Менеджер занимается сложными вопросами.</span></p></details>
+<details><summary><span class="uz">To'lov qanday amalga oshiriladi?</span><span class="ru">Как проходит оплата?</span></summary><p><span class="uz">Hozircha onlayn to'lov (Click, Payme) yo'q. Xaridor buyurtma beradi, siz u bilan kelishasiz va to'lov sizning kartangizga yoki naqd bo'ladi. Onlayn to'lovni keyingi bosqichda qo'shamiz.</span><span class="ru">Пока онлайн-оплаты (Click, Payme) нет. Клиент оформляет заказ, вы связываетесь с ним, оплата идёт на вашу карту или наличными. Онлайн-оплату добавим на следующем этапе.</span></p></details>
+<details><summary><span class="uz">Postlarim qanday formatda bo'lishi kerak?</span><span class="ru">В каком формате должны быть посты?</span></summary><p><span class="uz">Rasm va izoh: «Razmer 46-56, Narxi 745.000, Code #MO8853». AI turli yozilishni tushunadi. Noto'g'ri o'qilsa, panelda tuzatasiz.</span><span class="ru">Фото и подпись: «Размер 46-56, Цена 745.000, Code #MO8853». AI понимает разные варианты записи. Если ошибся — поправите в панели.</span></p></details>
+<details><summary><span class="uz">Kanalim bo'lmasa-chi?</span><span class="ru">А если у меня нет канала?</span></summary><p><span class="uz">Muammo emas. Botga rasm va izoh yuborasiz, mahsulot kartochkasi 3 tilda o'zi yaratiladi.</span><span class="ru">Не проблема. Отправляете боту фото и подпись, карточка товара создаётся автоматически на 3 языках.</span></p></details>
+<div class="honest"><span class="uz"><b>Halol aytamiz:</b> xizmat yangi, siz kabi dastlabki sotuvchilar bilan birga rivojlantiryapmiz. Nima yetishmasa, ayting — tezda qo'shamiz.</span><span class="ru"><b>Честно:</b> сервис новый, мы развиваем его вместе с первыми продавцами. Чего не хватает — скажите, быстро добавим.</span></div>
+</div></section>
+
+<section style="padding-top:0"><div class="wrap" style="text-align:center">
+<h2><span class="uz">Boshlaymizmi?</span><span class="ru">Начнём?</span></h2>
+<p class="lead" style="margin-left:auto;margin-right:auto"><span class="uz">Botga yozing — kanalingizni 5 daqiqada ulaymiz.</span><span class="ru">Напишите боту — подключим ваш канал за 5 минут.</span></p>
+<a class="btn" href="https://t.me/savia_shop_bot"><span class="uz">@savia_shop_bot ni ochish</span><span class="ru">Открыть @savia_shop_bot</span></a></div></section>
+
+<footer><div class="wrap">Savia · <a href="https://t.me/savia_shop_bot">@savia_shop_bot</a></div></footer>
+<script>
+  document.querySelectorAll(".lang button").forEach(function (b) {
+    b.onclick = function () {
+      var l = b.dataset.l; document.documentElement.lang = l;
+      try { localStorage.setItem("lp-lang", l); } catch (e) {}
+    };
+  });
+</script>
+</body>
+</html>

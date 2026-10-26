@@ -201,5 +201,11 @@ assert.equal((await fetch(`${base}${demo.products[0].photos[0]}`)).status, 200);
 assert.ok(demo.products.some((x: any) => x.oldPrice));
 assert.equal((await (await post("/api/quote", { slug: "demo", items: [{ id: demo.products[0].id, qty: 1, size: "46" }], promo: "DEMO10" })).json()).promoOk, true);
 
+// --- landing ---
+const land = await (await fetch(`${base}/`)).text();
+assert.match(land, /Savia/);
+assert.match(land, new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/static/landing/og.jpg`));
+assert.equal((await fetch(`${base}/static/landing/catalog.jpg`)).status, 200);
+
 srv.close();
 console.log("smoke ok");
