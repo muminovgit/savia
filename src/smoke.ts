@@ -27,5 +27,13 @@ const chat = await (await fetch(`${base}/api/chat`, { method: "POST", headers: {
 assert.ok(chat.answer);
 assert.equal((await fetch(`${base}/s/nope`)).status, 404);
 assert.equal(esc(`<script>"'`), "&lt;script&gt;&quot;&#39;");
+const ord = await (await fetch(`${base}/api/orders`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: shop.slug, items: [{ id: p.id, qty: 2 }], name: "Ali", phone: "+998901234567", address: "Toshkent" }) })).json();
+assert.ok(ord.id);
+const { getOrder, getOrderItems } = await import("./db.js");
+assert.equal(getOrder(ord.id)!.total.replace(/\s/g, " "), "360 000 UZS");
+assert.equal(getOrderItems(ord.id)[0].qty, 2);
+const bad = await fetch(`${base}/api/orders`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: shop.slug, items: [{ id: 99999, qty: 1 }], name: "Ali", phone: "+998901234567" }) });
+assert.equal(bad.status, 400);
+assert.match(await (await fetch(`${base}/s/${shop.slug}/cart`)).text(), /Savat/);
 srv.close();
 console.log("smoke ok");

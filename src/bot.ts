@@ -1,10 +1,11 @@
 import { Bot, InlineKeyboard } from "grammy";
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getProduct, listProducts, updateProductPhotos, updateShop } from "./db.js";
+import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, listOrders, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
 import { enhance, hasRemoveBg, whiteBackground } from "./image.js";
 import { generateProduct } from "./ai.js";
-import { setSellerNotifier } from "./server.js";
+import type { Order, OrderStatus } from "./db.js";
+import { setOrderNotifier, setSellerNotifier } from "./server.js";
 
 const PUBLIC_URL = (
   process.env.PUBLIC_URL ??
@@ -21,7 +22,7 @@ export function createBot(token: string) {
   bot.command("start", async (ctx) => {
     const shop = shopOf(ctx);
     await ctx.reply(
-      `Salom! Men Savia botman.\n\nMahsulot qo'shish: rasm yuboring va izohga yozing, masalan:\n"qizil ko'ylak, 42-razmer, 180000 so'm"\n\nAI tavsif yozadi va o'zbek/rus/ingliz tillariga tarjima qiladi.\n\nDo'koningiz: ${link(shop.slug)}\n\nBuyruqlar:\n/products — mahsulotlar\n/name Do'kon nomi\n/contact @username yoki +998...\n/shop — do'kon linki`,
+      `Salom! Men Savia botman.\n\nMahsulot qo'shish: rasm yuboring va izohga yozing, masalan:\n"qizil ko'ylak, 42-razmer, 180000 so'm"\n\nAI tavsif yozadi va o'zbek/rus/ingliz tillariga tarjima qiladi.\n\nDo'koningiz: ${link(shop.slug)}\n\nBuyruqlar:\n/products — mahsulotlar\n/name Do'kon nomi\n/contact @username yoki +998...\n/payment To'lov ma'lumoti (karta raqami va h.k.)\n/orders — buyurtmalar\n/shop — do'kon linki`,
     );
   });
 
@@ -39,6 +40,28 @@ export function createBot(token: string) {
     if (!contact) return void ctx.reply("Masalan: /contact @gulnora yoki /contact +998901234567");
     updateShop(shopOf(ctx).id, { contact });
     await ctx.reply("Aloqa ma'lumoti saqlandi.");
+  });
+
+  bot.command("payment", async (ctx) => {
+    const payment = ctx.match.trim().slice(0, 200);
+    if (!payment) return void ctx.reply("Masalan: /payment Karta 8600 1234 5678 9012 (Gulnora A.) yoki /payment Naqd pul, yetkazganda");
+    updateShop(shopOf(ctx).id, { payment });
+    await ctx.reply("To'lov ma'lumoti saqlandi. Xaridor buyurtma bergach shu ko'rinadi.");
+  });
+
+  bot.command("orders", async (ctx) => {
+    const orders = listOrders(shopOf(ctx).id);
+    if (!orders.length) return void ctx.reply("Hali buyurtma yo'q.");
+    for (const o of orders) await ctx.reply(orderText(o), { reply_markup: orderKeyboard(o) });
+  });
+
+  bot.callbackQuery(/^ord:(confirmed|shipped|cancelled):(\d+)$/, async (ctx) => {
+    const status = ctx.match[1] as OrderStatus;
+    const shop = shopOf(ctx);
+    if (!setOrderStatus(Number(ctx.match[2]), shop.id, status)) return void ctx.answerCallbackQuery("Topilmadi");
+    await ctx.answerCallbackQuery(STATUS[status]);
+    const o = getOrder(Number(ctx.match[2]))!;
+    await ctx.editMessageText(orderText(o), { reply_markup: orderKeyboard(o) });
   });
 
   bot.command("products", async (ctx) => {
@@ -159,6 +182,29 @@ export function createBot(token: string) {
   bot.on("message:voice", (ctx) =>
     ctx.reply("Ovozli xabar keyingi versiyada. Hozircha matn yoki rasm+izoh yuboring."),
   );
+
+  const STATUS: Record<OrderStatus, string> = { new: "Yangi", confirmed: "Tasdiqlandi", shipped: "Yuborildi", cancelled: "Bekor qilindi" };
+  const orderText = (o: Order) => {
+    const lines = getOrderItems(o.id).map(
+      (i) => `• ${i.title} x${i.qty}${i.price != null ? ` — ${new Intl.NumberFormat("ru-RU").format(i.price * i.qty)} ${i.currency}` : ""}`,
+    );
+    const head = [`Buyurtma #${o.id} — ${STATUS[o.status]}`, `Ism: ${o.name}`, `Telefon: ${o.phone}`];
+    if (o.address) head.push(`Manzil: ${o.address}`);
+    if (o.note) head.push(`Izoh: ${o.note}`);
+    return [...head, "", ...lines, ...(o.total ? ["", `Jami: ${o.total}`] : [])].join("\n");
+  };
+  const orderKeyboard = (o: Order) =>
+    new InlineKeyboard()
+      .text("Tasdiqlash", `ord:confirmed:${o.id}`)
+      .text("Yuborildi", `ord:shipped:${o.id}`)
+      .row()
+      .text("Bekor qilish", `ord:cancelled:${o.id}`);
+
+  setOrderNotifier((shop, order) => {
+    bot.api
+      .sendMessage(shop.tg_id, orderText(order), { reply_markup: orderKeyboard(order) })
+      .catch((e) => console.error("order notify failed", e));
+  });
 
   setSellerNotifier((shop, product, question) => {
     bot.api

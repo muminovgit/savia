@@ -15,6 +15,7 @@ export interface Shop {
   slug: string;
   name: string;
   contact: string;
+  payment: string;
 }
 
 export interface Product {
@@ -88,8 +89,9 @@ export const getShopBySlug = (slug: string) =>
 export const getShopById = (id: number) =>
   db.prepare("SELECT * FROM shops WHERE id = ?").get(id) as Shop | undefined;
 
-export function updateShop(id: number, fields: Partial<Pick<Shop, "name" | "contact">>) {
+export function updateShop(id: number, fields: Partial<Pick<Shop, "name" | "contact" | "payment">>) {
   if (fields.name !== undefined) db.prepare("UPDATE shops SET name = ? WHERE id = ?").run(fields.name, id);
+  if (fields.payment !== undefined) db.prepare("UPDATE shops SET payment = ? WHERE id = ?").run(fields.payment, id);
   if (fields.contact !== undefined) db.prepare("UPDATE shops SET contact = ? WHERE id = ?").run(fields.contact, id);
 }
 
@@ -129,4 +131,92 @@ export function logQuestion(productId: number, question: string, answered: boole
     question,
     answered ? 1 : 0,
   );
+}
+
+// --- orders ---
+try {
+  db.exec("ALTER TABLE shops ADD COLUMN payment TEXT NOT NULL DEFAULT ''");
+} catch {
+  /* column already exists */
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS orders (
+  id INTEGER PRIMARY KEY,
+  shop_id INTEGER NOT NULL REFERENCES shops(id),
+  name TEXT NOT NULL,
+  phone TEXT NOT NULL,
+  address TEXT NOT NULL DEFAULT '',
+  note TEXT NOT NULL DEFAULT '',
+  total TEXT NOT NULL DEFAULT '',
+  status TEXT NOT NULL DEFAULT 'new',
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE TABLE IF NOT EXISTS order_items (
+  id INTEGER PRIMARY KEY,
+  order_id INTEGER NOT NULL REFERENCES orders(id),
+  product_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  price REAL,
+  currency TEXT NOT NULL,
+  qty INTEGER NOT NULL
+);
+`);
+
+export type OrderStatus = "new" | "confirmed" | "shipped" | "cancelled";
+
+export interface Order {
+  id: number;
+  shop_id: number;
+  name: string;
+  phone: string;
+  address: string;
+  note: string;
+  total: string;
+  status: OrderStatus;
+  created_at: string;
+}
+
+export interface OrderItem {
+  product_id: number;
+  title: string;
+  price: number | null;
+  currency: string;
+  qty: number;
+}
+
+export function createOrder(
+  shopId: number,
+  customer: { name: string; phone: string; address: string; note: string },
+  items: { product: Product; qty: number }[],
+): Order {
+  const totals = new Map<string, number>();
+  for (const { product, qty } of items) {
+    if (product.price != null) totals.set(product.currency, (totals.get(product.currency) ?? 0) + product.price * qty);
+  }
+  const total = [...totals].map(([c, v]) => `${new Intl.NumberFormat("ru-RU").format(v)} ${c}`).join(" + ");
+  const tx = db.transaction(() => {
+    const id = Number(
+      db
+        .prepare("INSERT INTO orders (shop_id, name, phone, address, note, total) VALUES (?,?,?,?,?,?)")
+        .run(shopId, customer.name, customer.phone, customer.address, customer.note, total).lastInsertRowid,
+    );
+    const ins = db.prepare("INSERT INTO order_items (order_id, product_id, title, price, currency, qty) VALUES (?,?,?,?,?,?)");
+    for (const { product, qty } of items) {
+      ins.run(id, product.id, product.translations.uz.title, product.price, product.currency, qty);
+    }
+    return id;
+  });
+  return getOrder(tx())!;
+}
+
+export const getOrder = (id: number) => db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as Order | undefined;
+
+export const getOrderItems = (orderId: number) =>
+  db.prepare("SELECT product_id, title, price, currency, qty FROM order_items WHERE order_id = ?").all(orderId) as OrderItem[];
+
+export const listOrders = (shopId: number, limit = 10) =>
+  db.prepare("SELECT * FROM orders WHERE shop_id = ? ORDER BY id DESC LIMIT ?").all(shopId, limit) as Order[];
+
+export function setOrderStatus(id: number, shopId: number, status: OrderStatus): boolean {
+  return db.prepare("UPDATE orders SET status = ? WHERE id = ? AND shop_id = ?").run(status, id, shopId).changes > 0;
 }
