@@ -2,11 +2,11 @@ import { Bot, InlineKeyboard } from "grammy";
 import type { Api } from "grammy";
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { DATA_DIR, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, getShopByChannel, listOrders, productBySource, setShopChannel, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
+import { DATA_DIR, isSoldOut, markButton, setStock, addProduct, deleteProduct, getOrCreateShop, getOrder, getOrderItems, getProduct, getShopByChannel, listOrders, productBySource, setShopChannel, listProducts, setOrderStatus, updateProductPhotos, updateShop } from "./db.js";
 import { enhance, hasRemoveBg, whiteBackground } from "./image.js";
 import { generateProduct } from "./ai.js";
-import type { Order, OrderStatus, Shop } from "./db.js";
-import { setOrderNotifier, setSellerNotifier } from "./server.js";
+import type { Order, OrderStatus, Product, Shop } from "./db.js";
+import { setOrderNotifier, setSellerNotifier, setStockNotifier } from "./server.js";
 
 const PUBLIC_URL = (
   process.env.PUBLIC_URL ??
@@ -25,10 +25,26 @@ export function createBot(token: string) {
     getOrCreateShop(ctx.from!.id, ctx.from!.first_name);
   const link = (slug: string) => `${PUBLIC_URL}/s/${slug}`;
 
+  /** The button under a channel post links to the product page and turns into "Tugadi" when nothing is left. */
+  async function setChannelButton(shop: Shop, p: Product) {
+    if (!p.src_chat || !p.src_msg) return;
+    try {
+      await bot.api.editMessageReplyMarkup(p.src_chat, p.src_msg, {
+        reply_markup: { inline_keyboard: [[{ text: isSoldOut(p) ? "❌ Tugadi" : "🛒 Buyurtma berish", url: `${link(shop.slug)}/p/${p.id}` }]] },
+      });
+      markButton(p.id, true);
+    } catch (e) {
+      console.error("channel button failed (the bot needs the 'Edit messages' admin right)", e);
+    }
+  }
+
+  const stockText = (p: Product) =>
+    p.stock ? Object.entries(p.stock).map(([k, q]) => `${k === "_" ? "jami" : k}: ${q}`).join(", ") : "kuzatilmaydi";
+
   bot.command("start", async (ctx) => {
     const shop = shopOf(ctx);
     await ctx.reply(
-      `Salom! Men Savia botman.\n\nMahsulot qo'shish: rasm yuboring va izohga yozing, masalan:\n"qizil ko'ylak, 42-razmer, 180000 so'm"\n\nAI tavsif yozadi va o'zbek/rus/ingliz tillariga tarjima qiladi.\n\nDo'koningiz: ${link(shop.slug)}\n\nBuyruqlar:\n/products — mahsulotlar\n/name Do'kon nomi\n/contact @username yoki +998...\n/channel — kanalni ulash\n/payment To'lov ma'lumoti (karta raqami va h.k.)\n/orders — buyurtmalar\n/shop — do'kon linki`,
+      `Salom! Men Savia botman.\n\nMahsulot qo'shish: rasm yuboring va izohga yozing, masalan:\n"qizil ko'ylak, 42-razmer, 180000 so'm"\n\nAI tavsif yozadi va o'zbek/rus/ingliz tillariga tarjima qiladi.\n\nDo'koningiz: ${link(shop.slug)}\n\nBuyruqlar:\n/products — mahsulotlar\n/name Do'kon nomi\n/contact @username yoki +998...\n/channel — kanalni ulash\n/stock — qoldiq\n/payment To'lov ma'lumoti (karta raqami va h.k.)\n/orders — buyurtmalar\n/shop — do'kon linki`,
     );
   });
 
@@ -73,7 +89,47 @@ export function createBot(token: string) {
     if (!setOrderStatus(Number(ctx.match[2]), shop.id, status)) return void ctx.answerCallbackQuery("Topilmadi");
     await ctx.answerCallbackQuery(STATUS[status]);
     const o = getOrder(Number(ctx.match[2]))!;
+    if (status === "cancelled") {
+      for (const it of getOrderItems(o.id)) {
+        const p = getProduct(it.product_id);
+        if (p?.src_btn) await setChannelButton(shop, p);
+      }
+    }
     await ctx.editMessageText(orderText(o), { reply_markup: orderKeyboard(o) });
+  });
+
+  bot.callbackQuery(/^stk:(\d+)$/, async (ctx) => {
+    await ctx.answerCallbackQuery();
+    await ctx.reply(`Qoldiqni kiriting:\n/stock ${ctx.match[1]} 46:3 48:5 50:2  (razmer bo'yicha)\n/stock ${ctx.match[1]} 10  (umumiy son)\n/stock ${ctx.match[1]} off  (kuzatmaslik)`);
+  });
+
+  bot.command("stock", async (ctx) => {
+    const shop = shopOf(ctx);
+    const args = ctx.match.trim().split(/\s+/).filter(Boolean);
+    if (!args.length) {
+      const items = listProducts(shop.id).slice(0, 30);
+      if (!items.length) return void ctx.reply("Hali mahsulot yo'q.");
+      return void ctx.reply(items.map((p) => `#${p.id} ${p.translations.uz.title} — ${stockText(p)}`).join("\n") + "\n\nO'zgartirish: /stock <raqam> 46:3 48:5");
+    }
+    const p = getProduct(Number(args[0]));
+    if (!p || p.shop_id !== shop.id) return void ctx.reply("Mahsulot topilmadi. /products");
+    const rest = args.slice(1);
+    if (!rest.length) return void ctx.reply(`#${p.id} ${p.translations.uz.title}: ${stockText(p)}\n\nO'zgartirish: /stock ${p.id} 46:3 48:5 yoki /stock ${p.id} 10 yoki /stock ${p.id} off`);
+    let stock: Record<string, number> | null;
+    if (rest[0] === "off") stock = null;
+    else if (rest.length === 1 && /^\d{1,6}$/.test(rest[0])) stock = { _: Number(rest[0]) };
+    else {
+      stock = {};
+      for (const pair of rest) {
+        const m = /^([^:=\s]{1,12})[:=](\d{1,6})$/.exec(pair);
+        if (!m || m[1] === "_" || Object.keys(stock).length >= 30) return void ctx.reply(`Noto'g'ri format: "${pair}". Masalan: /stock ${p.id} 46:3 48:5`);
+        stock[m[1]] = Number(m[2]);
+      }
+    }
+    setStock(p.id, shop.id, stock);
+    const fresh = getProduct(p.id)!;
+    if (fresh.src_btn) await setChannelButton(shop, fresh);
+    await ctx.reply(`Qoldiq yangilandi (#${p.id}): ${stockText(fresh)}`);
   });
 
   bot.command("products", async (ctx) => {
@@ -100,7 +156,7 @@ export function createBot(token: string) {
   const productKeyboard = (id: number, hasPhotos: boolean) => {
     const kb = new InlineKeyboard();
     if (hasPhotos && hasRemoveBg) kb.text("Oq fon", `bg:${id}`);
-    return kb.text("O'chirish", `del:${id}`);
+    return kb.text("Qoldiq", `stk:${id}`).text("O'chirish", `del:${id}`);
   };
 
   bot.callbackQuery(/^bg:(\d+)$/, async (ctx) => {
@@ -157,6 +213,7 @@ export function createBot(token: string) {
     await ctx.replyWithChatAction("typing");
     try {
       const p = await buildProduct(ctx.api, shop, text, files, src);
+      if (src && files.length === 1) await setChannelButton(shop, p);
       const uz = p.translations.uz;
       await ctx.reply(
         `Qo'shildi (#${p.id}, ${p.photos.length} ta rasm):\n\n${uz.title}\n${uz.description}\nNarxi: ${p.price ?? "ko'rsatilmagan"} ${p.currency}\n\nKatalog: ${link(shop.slug)}`,
@@ -237,11 +294,12 @@ export function createBot(token: string) {
       const msg = Math.min(...files.map((f) => f.srcMsg!));
       if (productBySource(chat, msg)) return;
       buildProduct(ctx.api, shop, text, files, { chat, msg })
-        .then((p) =>
-          bot.api.sendMessage(shop.tg_id, `Kanaldan yangi mahsulot qo'shildi (#${p.id}): ${p.translations.uz.title}\nKatalog: ${link(shop.slug)}`, {
+        .then(async (p) => {
+          if (files.length === 1) await setChannelButton(shop, p);
+          return bot.api.sendMessage(shop.tg_id, `Kanaldan yangi mahsulot qo'shildi (#${p.id}): ${p.translations.uz.title}\nKatalog: ${link(shop.slug)}`, {
             reply_markup: productKeyboard(p.id, p.photos.length > 0),
-          }),
-        )
+          });
+        })
         .catch((e) => console.error("channel import failed", e));
     });
   });
@@ -260,7 +318,7 @@ export function createBot(token: string) {
   const STATUS: Record<OrderStatus, string> = { new: "Yangi", confirmed: "Tasdiqlandi", shipped: "Yuborildi", cancelled: "Bekor qilindi" };
   const orderText = (o: Order) => {
     const lines = getOrderItems(o.id).map(
-      (i) => `• ${i.title} x${i.qty}${i.price != null ? ` — ${new Intl.NumberFormat("ru-RU").format(i.price * i.qty)} ${i.currency}` : ""}`,
+      (i) => `• ${i.title}${i.size ? ` (${i.size})` : ""} x${i.qty}${i.price != null ? ` — ${new Intl.NumberFormat("ru-RU").format(i.price * i.qty)} ${i.currency}` : ""}`,
     );
     const head = [`Buyurtma #${o.id} — ${STATUS[o.status]}`, `Ism: ${o.name}`, `Telefon: ${o.phone}`];
     if (o.address) head.push(`Manzil: ${o.address}`);
@@ -278,6 +336,20 @@ export function createBot(token: string) {
     bot.api
       .sendMessage(shop.tg_id, orderText(order), { reply_markup: orderKeyboard(order) })
       .catch((e) => console.error("order notify failed", e));
+  });
+
+  setStockNotifier(async (shop, ids) => {
+    for (const id of ids) {
+      const p = getProduct(id);
+      if (!p?.stock) continue;
+      if (p.src_btn) await setChannelButton(shop, p);
+      const low = Object.entries(p.stock).filter(([, q]) => q <= 2).map(([k, q]) => `${k === "_" ? "jami" : k}: ${q === 0 ? "tugadi" : `${q} ta qoldi`}`);
+      if (low.length) {
+        await bot.api
+          .sendMessage(shop.tg_id, `Qoldiq kam — ${p.translations.uz.title} (#${p.id}):\n${low.join("\n")}\n\nYangilash: /stock ${p.id} ...`)
+          .catch((e) => console.error("stock alert failed", e));
+      }
+    }
   });
 
   setSellerNotifier((shop, product, question) => {

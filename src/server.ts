@@ -1,14 +1,14 @@
 import express from "express";
-import { DATA_DIR, LANGS, createOrder, getProduct, getShopById, getShopBySlug, listProducts, logQuestion } from "./db.js";
+import { DATA_DIR, LANGS, OutOfStock, createOrder, getProduct, isSoldOut, sizesOf, getShopById, getShopBySlug, listProducts, logQuestion } from "./db.js";
 import type { Lang, Order, Product, Shop } from "./db.js";
 import { answerQuestion } from "./ai.js";
 
 const UI: Record<Lang, Record<string, string>> = {
-  uz: { ask: "Savol bering", send: "Yuborish", contact: "Sotuvchiga yozish", empty: "Hozircha mahsulot yo'q", hint: "Masalan: razmeri bormi?", back: "Katalog", price: "Narxi", agree: "Narxi kelishiladi", search: "Qidirish: nomi, kod, razmer",
+  uz: { ask: "Savol bering", send: "Yuborish", contact: "Sotuvchiga yozish", empty: "Hozircha mahsulot yo'q", hint: "Masalan: razmeri bormi?", back: "Katalog", price: "Narxi", agree: "Narxi kelishiladi", search: "Qidirish: nomi, kod, razmer", soldout: "Tugadi", pickSize: "Razmerni tanlang", left: "Qolgani:", oos: "Afsuski, yetarli emas:",
     add: "Savatga qo'shish", added: "Savatga qo'shildi ✓", cart: "Savat", cartEmpty: "Savat bo'sh", total: "Jami", checkout: "Buyurtma berish", name: "Ismingiz", phone: "Telefon raqamingiz", address: "Yetkazish manzili", note: "Izoh (ixtiyoriy)", sending: "Yuborilmoqda...", placed: "Buyurtma qabul qilindi", thanks: "Sotuvchi tez orada siz bilan bog'lanadi.", pay: "To'lov ma'lumoti", remove: "O'chirish", error: "Xatolik, qayta urinib ko'ring", orderNo: "Buyurtma raqami" },
-  ru: { ask: "Задайте вопрос", send: "Отправить", contact: "Написать продавцу", empty: "Товаров пока нет", hint: "Например: есть ли размер?", back: "Каталог", price: "Цена", agree: "Цена договорная", search: "Поиск: название, код, размер",
+  ru: { ask: "Задайте вопрос", send: "Отправить", contact: "Написать продавцу", empty: "Товаров пока нет", hint: "Например: есть ли размер?", back: "Каталог", price: "Цена", agree: "Цена договорная", search: "Поиск: название, код, размер", soldout: "Нет в наличии", pickSize: "Выберите размер", left: "Осталось:", oos: "К сожалению, недостаточно:",
     add: "В корзину", added: "Добавлено ✓", cart: "Корзина", cartEmpty: "Корзина пуста", total: "Итого", checkout: "Оформить заказ", name: "Ваше имя", phone: "Ваш телефон", address: "Адрес доставки", note: "Комментарий (необязательно)", sending: "Отправка...", placed: "Заказ принят", thanks: "Продавец скоро свяжется с вами.", pay: "Данные для оплаты", remove: "Удалить", error: "Ошибка, попробуйте снова", orderNo: "Номер заказа" },
-  en: { ask: "Ask a question", send: "Send", contact: "Message the seller", empty: "No products yet", hint: "e.g. is it available in size M?", back: "Catalog", price: "Price", agree: "Price on request", search: "Search: name, code, size",
+  en: { ask: "Ask a question", send: "Send", contact: "Message the seller", empty: "No products yet", hint: "e.g. is it available in size M?", back: "Catalog", price: "Price", agree: "Price on request", search: "Search: name, code, size", soldout: "Sold out", pickSize: "Pick a size", left: "Left:", oos: "Sorry, not enough stock:",
     add: "Add to cart", added: "Added ✓", cart: "Cart", cartEmpty: "Your cart is empty", total: "Total", checkout: "Place order", name: "Your name", phone: "Your phone", address: "Delivery address", note: "Note (optional)", sending: "Sending...", placed: "Order received", thanks: "The seller will contact you soon.", pay: "Payment details", remove: "Remove", error: "Something went wrong, try again", orderNo: "Order number" },
 };
 
@@ -41,7 +41,7 @@ main{max-width:960px;margin:0 auto;padding:16px}.grid{display:grid;grid-template
 .price{font-weight:700;margin-top:4px}.detail{background:#fff;border-radius:12px;overflow:hidden}.detail .in{padding:16px}
 .attrs{color:#555;font-size:14px}.btn{display:inline-block;background:#1a1a1a;color:#fff;border:0;border-radius:8px;padding:10px 14px;text-decoration:none;cursor:pointer;font-size:15px}
 #log{margin:12px 0;display:flex;flex-direction:column;gap:8px}.m{padding:8px 12px;border-radius:12px;max-width:85%}
-.u{background:#1a1a1a;color:#fff;align-self:flex-end}.a{background:#eee}form{display:flex;gap:8px}form.col{flex-direction:column}.ci{display:flex;gap:10px;align-items:center;background:#fff;border-radius:12px;padding:8px;margin-bottom:8px}.ci img{width:64px;height:64px;object-fit:cover;border-radius:8px}.ci .t{flex:1}.ci button{border:0;background:#eee;border-radius:6px;padding:4px 10px;cursor:pointer}.ok{background:#fff;border-radius:12px;padding:16px}textarea{padding:10px;border:1px solid #ccc;border-radius:8px;font-size:15px;font-family:inherit}input{flex:1;padding:10px;border:1px solid #ccc;border-radius:8px;font-size:15px}
+.u{background:#1a1a1a;color:#fff;align-self:flex-end}.a{background:#eee}form{display:flex;gap:8px}form.col{flex-direction:column}.ci{display:flex;gap:10px;align-items:center;background:#fff;border-radius:12px;padding:8px;margin-bottom:8px}.ci img{width:64px;height:64px;object-fit:cover;border-radius:8px}.ci .t{flex:1}.ci button{border:0;background:#eee;border-radius:6px;padding:4px 10px;cursor:pointer}.ok{background:#fff;border-radius:12px;padding:16px}.szb{border:1px solid #ccc;background:#fff;border-radius:8px;padding:8px 12px;margin:0 6px 6px 0;cursor:pointer;font-size:15px}.szb.on{background:#1a1a1a;color:#fff}.szb:disabled{opacity:.35;text-decoration:line-through;cursor:default}.sold{color:#b00020;font-weight:700}.btn:disabled{opacity:.4;cursor:default}textarea{padding:10px;border:1px solid #ccc;border-radius:8px;font-size:15px;font-family:inherit}input{flex:1;padding:10px;border:1px solid #ccc;border-radius:8px;font-size:15px}
 </style></head><body>${body}</body></html>`;
 
 const header = (shop: Shop, lang: Lang, path: string) =>
@@ -67,7 +67,7 @@ export function createServer() {
         const t = p.translations[lang];
         const img = p.photos[0] ? `<img loading="lazy" src="/photos/${esc(p.photos[0])}" alt="">` : `<div class="ph"></div>`;
         const hay = [...Object.values(p.translations).map((x) => x.title), p.category, ...Object.values(p.attributes)].join(" ").toLowerCase();
-        return `<a class="card" data-s="${esc(hay)}" href="/s/${esc(shop.slug)}/p/${p.id}?lang=${lang}">${img}<div>${esc(t.title)}<div class="price">${esc(priceText(p, lang))}</div></div></a>`;
+        return `<a class="card" data-s="${esc(hay)}" href="/s/${esc(shop.slug)}/p/${p.id}?lang=${lang}">${img}<div>${esc(t.title)}<div class="price${isSoldOut(p) ? " sold" : ""}">${esc(isSoldOut(p) ? UI[lang].soldout : priceText(p, lang))}</div></div></a>`;
       })
       .join("");
     res.send(
@@ -84,19 +84,28 @@ export function createServer() {
     const ui = UI[lang];
     const attrs = Object.entries(product.attributes).map(([k, v]) => `${esc(k)}: ${esc(v)}`).join(" · ");
     const href = contactHref(shop.contact);
+    const soldOut = isSoldOut(product);
+    const sizes = sizesOf(product);
+    const left = product.stock ? Object.values(product.stock).reduce((a, b) => a + Math.max(0, b), 0) : null;
+    const sizeHtml =
+      (sizes.length ? `<div>${sizes.map((s) => `<button type="button" class="szb" data-s="${esc(s)}"${product.stock![s] <= 0 ? " disabled" : ""}>${esc(s)}</button>`).join("")}</div>` : "") +
+      (left != null && left > 0 && left <= 3 ? `<p class="sold">${ui.left} ${left}</p>` : "");
     const img = product.photos.map((f) => `<img src="/photos/${esc(f)}" alt="">`).join("");
     const body = `${header(shop, lang, `/s/${esc(shop.slug)}/p/${product.id}`)}<main>
 <p><a href="/s/${esc(shop.slug)}?lang=${lang}">← ${ui.back}</a></p>
 <div class="detail">${img}<div class="in"><h2>${esc(t.title)}</h2><div class="price">${esc(priceText(product, lang))}</div>
 <p>${esc(t.description)}</p><p class="attrs">${attrs}</p>
-<p><button class="btn" id="addc">${ui.add}</button></p>
+${sizeHtml}<p><button class="btn" id="addc"${soldOut ? " disabled" : ""}>${soldOut ? ui.soldout : ui.add}</button></p>
 ${href ? `<p><a class="btn" href="${esc(href)}">${ui.contact}</a></p>` : ""}
 <h3>${ui.ask}</h3><div id="log"></div>
 <form id="f"><input id="q" maxlength="300" placeholder="${esc(ui.hint)}" required><button class="btn">${ui.send}</button></form></div></div></main>
 <script>
 const P=${js({ id: product.id, title: t.title, price: product.price, currency: product.currency, photo: product.photos[0] ?? null })};
-document.getElementById('addc').onclick=e=>{const k='c:'+${js(shop.slug)};let c=[];try{c=JSON.parse(localStorage.getItem(k)||'[]')}catch{}
-const x=c.find(i=>i.id===P.id);if(x)x.qty=Math.min(20,x.qty+1);else c.push({...P,qty:1});localStorage.setItem(k,JSON.stringify(c));
+let sel='';const hasSz=document.querySelectorAll('.szb').length>0;
+document.querySelectorAll('.szb').forEach(b=>b.onclick=()=>{sel=b.dataset.s;document.querySelectorAll('.szb').forEach(x=>x.classList.toggle('on',x===b))});
+document.getElementById('addc').onclick=e=>{if(hasSz&&!sel){alert(${js(ui.pickSize)});return}
+const k='c:'+${js(shop.slug)};let c=[];try{c=JSON.parse(localStorage.getItem(k)||'[]')}catch{}
+const x=c.find(i=>i.id===P.id&&(i.size||'')===sel);if(x)x.qty=Math.min(20,x.qty+1);else c.push({...P,size:sel,qty:1});localStorage.setItem(k,JSON.stringify(c));
 document.getElementById('cc').textContent=c.reduce((n,i)=>n+i.qty,0);e.target.textContent=${js(ui.added)}};
 const log=document.getElementById('log');
 function add(c,t){const d=document.createElement('div');d.className='m '+c;d.textContent=t;log.appendChild(d)}
@@ -132,15 +141,16 @@ function draw(){const box=document.getElementById('items');box.textContent='';
  document.getElementById('of').style.display='flex';const tot={};
  c.forEach((i,idx)=>{const r=document.createElement('div');r.className='ci';
   if(i.photo){const im=document.createElement('img');im.src='/photos/'+i.photo;r.appendChild(im)}
-  const t=document.createElement('div');t.className='t';t.textContent=i.title+(i.price!=null?' — '+fmt(i.price)+' '+i.currency:'');r.appendChild(t);
+  const t=document.createElement('div');t.className='t';t.textContent=i.title+(i.size?' ('+i.size+')':'')+(i.price!=null?' — '+fmt(i.price)+' '+i.currency:'');r.appendChild(t);
   const mk=(l,d)=>{const b=document.createElement('button');b.textContent=l;b.onclick=()=>{i.qty+=d;if(i.qty<1)c.splice(idx,1);if(i.qty>20)i.qty=20;save();draw()};return b};
   r.appendChild(mk('−',-1));const q=document.createElement('span');q.textContent=i.qty;r.appendChild(q);r.appendChild(mk('+',1));box.appendChild(r);
   if(i.price!=null)tot[i.currency]=(tot[i.currency]||0)+i.price*i.qty});
  const parts=Object.entries(tot).map(([k,v])=>fmt(v)+' '+k);document.getElementById('total').textContent=parts.length?U.total+': '+parts.join(' + '):''}
 draw();
 document.getElementById('of').onsubmit=async e=>{e.preventDefault();const b=document.getElementById('go');b.disabled=true;b.textContent=U.sending;
- try{const r=await fetch('/api/orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({slug:${js(shop.slug)},items:c.map(i=>({id:i.id,qty:i.qty})),
+ try{const r=await fetch('/api/orders',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({slug:${js(shop.slug)},items:c.map(i=>({id:i.id,qty:i.qty,size:i.size||''})),
   name:n.value,phone:p.value,address:a.value,note:o.value})});const j=await r.json();
+  if(r.status===409){b.disabled=false;b.textContent=U.checkout;alert(U.oos+' '+j.title+(j.size?' ('+j.size+')':'')+' — '+j.have);return}
   if(!r.ok)throw new Error(j.error||'');
   c=[];save();document.getElementById('of').style.display='none';document.getElementById('items').textContent='';document.getElementById('total').textContent='';
   const d=document.getElementById('done');d.style.display='block';d.textContent='';
@@ -158,7 +168,7 @@ document.getElementById('of').onsubmit=async e=>{e.preventDefault();const b=docu
     const recent = (hits.get(ip) ?? []).filter((t) => now - t < 60_000);
     recent.push(now);
     hits.set(ip, recent);
-    return recent.length > 5;
+    return recent.length > Number(process.env.ORDER_RATE_LIMIT ?? 5);
   };
 
   app.post("/api/orders", (req, res) => {
@@ -172,21 +182,32 @@ document.getElementById('of').onsubmit=async e=>{e.preventDefault();const b=docu
     if (!shop || !name || digits.length < 7 || digits.length > 15 || !Array.isArray(b.items) || !b.items.length || b.items.length > 30) {
       return void res.status(400).json({ error: "bad request" });
     }
-    const merged = new Map<number, number>();
+    const merged = new Map<string, { id: number; size: string; qty: number }>();
     for (const it of b.items) {
       const id = Number(it?.id);
       const qty = Number(it?.qty);
+      const size = str(it?.size, 20);
       if (!Number.isInteger(id) || !Number.isInteger(qty) || qty < 1 || qty > 20) return void res.status(400).json({ error: "bad item" });
-      merged.set(id, Math.min(20, (merged.get(id) ?? 0) + qty));
+      const key = `${id}|${size}`;
+      merged.set(key, { id, size, qty: Math.min(20, (merged.get(key)?.qty ?? 0) + qty) });
     }
-    const items: { product: Product; qty: number }[] = [];
-    for (const [id, qty] of merged) {
+    const items: { product: Product; qty: number; size: string }[] = [];
+    for (const { id, size, qty } of merged.values()) {
       const product = getProduct(id);
       if (!product || product.shop_id !== shop.id) return void res.status(400).json({ error: "bad item" });
-      items.push({ product, qty });
+      const sizes = sizesOf(product);
+      if (sizes.length && !sizes.includes(size)) return void res.status(400).json({ error: "size required" });
+      items.push({ product, qty, size: sizes.length ? size : "" });
     }
-    const order = createOrder(shop.id, { name, phone, address: str(b.address, 200), note: str(b.note, 300) }, items);
+    let order: Order;
+    try {
+      order = createOrder(shop.id, { name, phone, address: str(b.address, 200), note: str(b.note, 300) }, items);
+    } catch (e) {
+      if (e instanceof OutOfStock) return void res.status(409).json({ error: "out_of_stock", title: e.title, size: e.size, have: e.have });
+      throw e;
+    }
     notifyOrder?.(shop, order);
+    notifyStock?.(shop, items.map((i) => i.product.id));
     res.json({ id: order.id, payment: shop.payment, contact: shop.contact });
   });
 
@@ -212,6 +233,8 @@ document.getElementById('of').onsubmit=async e=>{e.preventDefault();const b=docu
 
 /** Set by the bot so unanswered buyer questions reach the seller. */
 let notifySeller: ((shop: Shop, product: Product, question: string) => void) | undefined;
+let notifyStock: ((shop: Shop, productIds: number[]) => void) | undefined;
+export const setStockNotifier = (fn: typeof notifyStock) => void (notifyStock = fn);
 let notifyOrder: ((shop: Shop, order: Order) => void) | undefined;
 export const setOrderNotifier = (fn: typeof notifyOrder) => void (notifyOrder = fn);
 export const setSellerNotifier = (fn: typeof notifySeller) => void (notifySeller = fn);

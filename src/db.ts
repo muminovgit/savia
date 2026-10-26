@@ -28,6 +28,10 @@ export interface Product {
   attributes: Record<string, string>;
   translations: Record<Lang, Translation>;
   photos: string[];
+  stock: Record<string, number> | null;
+  src_chat: number | null;
+  src_msg: number | null;
+  src_btn: number;
 }
 
 export const DATA_DIR = process.env.DATA_DIR ?? "data";
@@ -70,6 +74,7 @@ const toProduct = (r: any): Product => ({
   attributes: JSON.parse(r.attributes),
   translations: JSON.parse(r.translations),
   photos: parsePhotos(r.photo),
+  stock: r.stock ? JSON.parse(r.stock) : null,
 });
 
 export function getOrCreateShop(tgId: number, displayName: string): Shop {
@@ -96,7 +101,7 @@ export function updateShop(id: number, fields: Partial<Pick<Shop, "name" | "cont
   if (fields.contact !== undefined) db.prepare("UPDATE shops SET contact = ? WHERE id = ?").run(fields.contact, id);
 }
 
-export function addProduct(p: Omit<Product, "id">, src?: { chat: number; msg: number }): Product {
+export function addProduct(p: Omit<Product, "id" | "stock" | "src_chat" | "src_msg" | "src_btn">, src?: { chat: number; msg: number }): Product {
   const id = db
     .prepare(
       "INSERT INTO products (shop_id, category, price, currency, attributes, translations, photo, src_chat, src_msg) VALUES (?,?,?,?,?,?,?,?,?)",
@@ -183,12 +188,28 @@ export interface OrderItem {
   price: number | null;
   currency: string;
   qty: number;
+  size: string;
 }
+
+export class OutOfStock extends Error {
+  constructor(public title: string, public size: string, public have: number) {
+    super(`out of stock: ${title} ${size}`);
+  }
+}
+
+export const sizesOf = (p: Product) => (p.stock ? Object.keys(p.stock).filter((k) => k !== "_") : []);
+export const isSoldOut = (p: Product) => p.stock != null && Object.values(p.stock).every((q) => q <= 0);
+
+export function setStock(id: number, shopId: number, stock: Record<string, number> | null): boolean {
+  return db.prepare("UPDATE products SET stock = ? WHERE id = ? AND shop_id = ?").run(stock ? JSON.stringify(stock) : null, id, shopId).changes > 0;
+}
+
+export const markButton = (id: number, on: boolean) => void db.prepare("UPDATE products SET src_btn = ? WHERE id = ?").run(on ? 1 : 0, id);
 
 export function createOrder(
   shopId: number,
   customer: { name: string; phone: string; address: string; note: string },
-  items: { product: Product; qty: number }[],
+  items: { product: Product; qty: number; size?: string }[],
 ): Order {
   const totals = new Map<string, number>();
   for (const { product, qty } of items) {
@@ -201,9 +222,16 @@ export function createOrder(
         .prepare("INSERT INTO orders (shop_id, name, phone, address, note, total) VALUES (?,?,?,?,?,?)")
         .run(shopId, customer.name, customer.phone, customer.address, customer.note, total).lastInsertRowid,
     );
-    const ins = db.prepare("INSERT INTO order_items (order_id, product_id, title, price, currency, qty) VALUES (?,?,?,?,?,?)");
-    for (const { product, qty } of items) {
-      ins.run(id, product.id, product.translations.uz.title, product.price, product.currency, qty);
+    const ins = db.prepare("INSERT INTO order_items (order_id, product_id, title, price, currency, qty, size) VALUES (?,?,?,?,?,?,?)");
+    for (const { product, qty, size = "" } of items) {
+      const fresh = getProduct(product.id)!; // re-read inside the transaction: two buyers must not take the last item
+      if (fresh.stock) {
+        const key = sizesOf(fresh).length ? size : "_";
+        const have = fresh.stock[key] ?? 0;
+        if (qty > have) throw new OutOfStock(product.translations.uz.title, size, have);
+        db.prepare("UPDATE products SET stock = ? WHERE id = ?").run(JSON.stringify({ ...fresh.stock, [key]: have - qty }), product.id);
+      }
+      ins.run(id, product.id, product.translations.uz.title, product.price, product.currency, qty, size);
     }
     return id;
   });
@@ -213,13 +241,26 @@ export function createOrder(
 export const getOrder = (id: number) => db.prepare("SELECT * FROM orders WHERE id = ?").get(id) as Order | undefined;
 
 export const getOrderItems = (orderId: number) =>
-  db.prepare("SELECT product_id, title, price, currency, qty FROM order_items WHERE order_id = ?").all(orderId) as OrderItem[];
+  db.prepare("SELECT product_id, title, price, currency, qty, size FROM order_items WHERE order_id = ?").all(orderId) as OrderItem[];
 
 export const listOrders = (shopId: number, limit = 10) =>
   db.prepare("SELECT * FROM orders WHERE shop_id = ? ORDER BY id DESC LIMIT ?").all(shopId, limit) as Order[];
 
 export function setOrderStatus(id: number, shopId: number, status: OrderStatus): boolean {
-  return db.prepare("UPDATE orders SET status = ? WHERE id = ? AND shop_id = ?").run(status, id, shopId).changes > 0;
+  const old = getOrder(id);
+  if (!old || old.shop_id !== shopId) return false;
+  db.transaction(() => {
+    db.prepare("UPDATE orders SET status = ? WHERE id = ?").run(status, id);
+    if (status === "cancelled" && old.status !== "cancelled") {
+      for (const it of getOrderItems(id)) {
+        const p = getProduct(it.product_id);
+        if (!p?.stock) continue;
+        const key = sizesOf(p).length ? it.size : "_";
+        db.prepare("UPDATE products SET stock = ? WHERE id = ?").run(JSON.stringify({ ...p.stock, [key]: (p.stock[key] ?? 0) + it.qty }), p.id);
+      }
+    }
+  })();
+  return true;
 }
 
 // --- channel import ---
@@ -244,3 +285,16 @@ export const setShopChannel = (shopId: number, channelId: number | null) =>
 
 export const productBySource = (chat: number, msg: number) =>
   db.prepare("SELECT id FROM products WHERE src_chat = ? AND src_msg = ?").get(chat, msg) as { id: number } | undefined;
+
+// --- stock ---
+for (const ddl of [
+  "ALTER TABLE products ADD COLUMN stock TEXT",
+  "ALTER TABLE products ADD COLUMN src_btn INTEGER NOT NULL DEFAULT 0",
+  "ALTER TABLE order_items ADD COLUMN size TEXT NOT NULL DEFAULT ''",
+]) {
+  try {
+    db.exec(ddl);
+  } catch {
+    /* column already exists */
+  }
+}

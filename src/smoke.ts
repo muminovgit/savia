@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+process.env.ORDER_RATE_LIMIT = "1000";
 process.env.DATA_DIR = `${process.env.TMPDIR ?? "/tmp"}/savia-smoke-${Date.now()}`;
 const { addProduct, getOrCreateShop, updateShop } = await import("./db.js");
 const { generateProduct } = await import("./ai.js");
@@ -42,5 +43,24 @@ const p2 = addProduct({ shop_id: shop.id, category: "x", price: 1, currency: "UZ
 assert.equal(productBySource(-1001234567890, 7)!.id, p2.id);
 assert.throws(() => addProduct({ shop_id: shop.id, category: "x", price: 1, currency: "UZS", attributes: {}, translations: g.translations, photos: [] }, { chat: -1001234567890, msg: 7 }));
 assert.match(await (await fetch(`${base}/s/${shop.slug}`)).text(), /data-s="[^"]*mo1/);
+// --- stock ---
+const { setStock, getProduct, OutOfStock, setOrderStatus, isSoldOut } = await import("./db.js");
+const sp = addProduct({ shop_id: shop.id, category: "x", price: 100, currency: "UZS", attributes: {}, translations: g.translations, photos: [] });
+setStock(sp.id, shop.id, { "46": 2, "48": 0 });
+const order = (size: string, qty: number) => fetch(`${base}/api/orders`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ slug: shop.slug, items: [{ id: sp.id, qty, size }], name: "Ali", phone: "+998901234567" }) });
+assert.equal((await order("", 1)).status, 400); // size required
+assert.equal((await order("48", 1)).status, 409); // sold-out size
+const r409 = await (await order("46", 3)).json();
+assert.equal(r409.have, 2);
+const okRes = await (await order("46", 2)).json();
+assert.equal(getProduct(sp.id)!.stock!["46"], 0);
+assert.ok(isSoldOut(getProduct(sp.id)!));
+assert.match(await (await fetch(`${base}/s/${shop.slug}`)).text(), /Tugadi/);
+setOrderStatus(okRes.id, shop.id, "cancelled");
+assert.equal(getProduct(sp.id)!.stock!["46"], 2);
+setStock(sp.id, shop.id, { _: 1 });
+assert.equal((await order("", 2)).status, 409);
+assert.equal((await order("", 1)).status, 200);
+assert.ok(OutOfStock);
 srv.close();
 console.log("smoke ok");
