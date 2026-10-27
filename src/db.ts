@@ -24,6 +24,7 @@ export interface Shop {
   delivery_fee: number;
   free_from: number;
   banners: string; // JSON array of photo file names
+  accent: string; // brand colour as #rrggbb, '' = default
 }
 
 export interface Product {
@@ -104,7 +105,7 @@ export const getShopBySlug = (slug: string) =>
 export const getShopById = (id: number) =>
   db.prepare("SELECT * FROM shops WHERE id = ?").get(id) as Shop | undefined;
 
-const SHOP_FIELDS = ["name", "contact", "payment", "about", "address", "phones", "min_order", "delivery_fee", "free_from", "banners"] as const;
+const SHOP_FIELDS = ["name", "contact", "payment", "about", "address", "phones", "min_order", "delivery_fee", "free_from", "banners", "accent"] as const;
 type ShopField = (typeof SHOP_FIELDS)[number];
 
 export function updateShop(id: number, fields: Partial<Pick<Shop, ShopField>>) {
@@ -548,3 +549,13 @@ export function updateProduct(id: number, shopId: number, patch: ProductPatch): 
   }
   return true;
 }
+
+// --- brand colour & buyer order history ---
+try {
+  db.exec("ALTER TABLE shops ADD COLUMN accent TEXT NOT NULL DEFAULT ''");
+} catch {
+  /* column already exists */
+}
+
+export const listBuyerOrders = (shopId: number, tgId: number, limit = 30) =>
+  db.prepare("SELECT * FROM orders WHERE shop_id = ? AND buyer_tg_id = ? ORDER BY id DESC LIMIT ?").all(shopId, tgId, limit) as Order[];

@@ -207,5 +207,34 @@ assert.match(land, /Savia/);
 assert.match(land, new RegExp(`${base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/static/landing/og.jpg`));
 assert.equal((await fetch(`${base}/static/landing/catalog.jpg`)).status, 200);
 
+// --- design update: resized images, accent colour, buyer order history, panel setup flags ---
+const { writeFileSync } = await import("node:fs");
+writeFileSync(`${process.env.DATA_DIR}/photos/t-photo.jpg`, await sharp({ create: { width: 2000, height: 1600, channels: 3, background: "#336699" } }).jpeg().toBuffer());
+const small = await fetch(`${base}/img/t-photo.jpg?w=480`);
+assert.equal(small.status, 200);
+assert.equal(small.headers.get("content-type"), "image/jpeg");
+assert.equal((await sharp(Buffer.from(await small.arrayBuffer())).metadata()).width, 480);
+assert.equal((await sharp(Buffer.from(await (await fetch(`${base}/img/t-photo.jpg?w=9999`)).arrayBuffer())).metadata()).width, 1200);
+assert.equal((await fetch(`${base}/img/nope.jpg`)).status, 404);
+assert.equal((await fetch(`${base}/img/..%2F..%2Fetc%2Fpasswd`)).status, 404);
+assert.equal((await fetch(`${base}/img/t-photo.orig`)).status, 404);
+
+assert.equal((await adm("/settings", "POST", { accent: "#2563eb" })).status, 200);
+assert.equal((await (await adm("/settings")).json()).settings.accent, "#2563eb");
+await adm("/settings", "POST", { accent: "javascript:alert(1)" }); // invalid colours are ignored
+assert.equal((await (await adm("/settings")).json()).settings.accent, "#2563eb");
+assert.equal((await (await fetch(`${base}/api/shop/${shop.slug}`)).json()).shop.accent, "#2563eb");
+await adm("/settings", "POST", { accent: "" });
+assert.equal((await (await adm("/settings")).json()).settings.accent, "");
+
+const mine = await (await fetch(`${base}/api/my-orders?slug=${shop.slug}`, { headers: { "x-tg-init": initData({ id: 777, first_name: "Ali" }) } })).json();
+assert.equal(mine.auth, true);
+assert.ok(mine.orders.length >= 1 && mine.orders.every((o: any) => Array.isArray(o.items)));
+assert.deepEqual(await (await fetch(`${base}/api/my-orders?slug=${shop.slug}`)).json(), { auth: false, orders: [] });
+const otherBuyer = await (await fetch(`${base}/api/my-orders?slug=${shop.slug}`, { headers: { "x-tg-init": initData({ id: 31337, first_name: "Eve" }) } })).json();
+assert.equal(otherBuyer.orders.length, 0); // buyers only see their own orders
+assert.equal((await (await adm("/overview")).json()).setup.products, true);
+for (const f of ["ds.css", "ds.js", "shop.css", "panel.css", "admin.js"]) assert.equal((await fetch(`${base}/static/${f}`)).status, 200);
+
 srv.close();
 console.log("smoke ok");

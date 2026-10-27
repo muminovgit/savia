@@ -3,15 +3,18 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
 <title>Savia Panel</title>
-<link rel="stylesheet" href="/static/app.css">
+<link rel="stylesheet" href="/static/ds.css">
+<link rel="stylesheet" href="/static/panel.css">
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 </head>
-<body class="adm">
-<div id="app"></div>
-<nav id="tabs"></nav>
-<div id="sheet"></div>
-<div id="toast"></div>
+<body>
+<div id="app" class="app"></div>
+<div id="cta" class="cta" hidden></div>
+<nav id="tabs" class="tabbar" aria-label="Menu"></nav>
+<div id="toast" role="status" aria-live="polite"></div>
+<script src="/static/ds.js"></script>
 <script src="/static/admin.js" defer></script>
 </body>
 </html>

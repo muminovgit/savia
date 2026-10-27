@@ -1,6 +1,8 @@
 import express from "express";
 import { createHmac, timingSafeEqual } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { resolve } from "node:path";
+import sharp from "sharp";
 import { fileURLToPath } from "node:url";
 import {
   DATA_DIR,
@@ -13,6 +15,7 @@ import {
   getOrder,
   getOrderItems,
   getProduct,
+  listBuyerOrders,
   listOrders,
   listPromos,
   savePromo,
@@ -77,6 +80,10 @@ const serializeShop = (shop: Shop) => ({
   freeFrom: shop.free_from,
   banners: shopBanners(shop).map((f) => `/photos/${f}`),
   contact: shop.contact,
+  accent: shop.accent,
+  link: process.env.MINIAPP_SHORTNAME
+    ? `https://t.me/${process.env.BOT_USERNAME ?? "savia_shop_bot"}/${process.env.MINIAPP_SHORTNAME}?startapp=${shop.slug}`
+    : "",
   bot: process.env.BOT_USERNAME ?? "savia_shop_bot",
 });
 
@@ -105,6 +112,30 @@ export function createServer() {
   app.set("trust proxy", 1);
   app.use(express.json({ limit: "20kb" }));
   app.use("/photos", express.static(`${DATA_DIR}/photos`, { maxAge: "1d" }));
+
+  // Resized copies of the photos (catalog cards should not download 1600px originals); cached on disk.
+  mkdirSync(`${DATA_DIR}/cache`, { recursive: true });
+  const IMG_WIDTHS = [240, 480, 800, 1200];
+  app.get("/img/:file", async (req, res) => {
+    const file = req.params.file;
+    if (!/^[\w.-]{1,80}\.(jpe?g|png|webp)$/i.test(file)) return void res.status(404).end();
+    const src = `${DATA_DIR}/photos/${file}`;
+    if (!existsSync(src)) return void res.status(404).end();
+    const want = Number(req.query.w);
+    const w = IMG_WIDTHS.find((x) => x >= want) ?? (Number.isFinite(want) && want > 0 ? 1200 : 800);
+    const cached = resolve(`${DATA_DIR}/cache/${w}-${file}.jpg`);
+    try {
+      if (!existsSync(cached)) {
+        const tmp = `${cached}.${process.pid}.${Date.now()}`;
+        await sharp(src).rotate().resize({ width: w, withoutEnlargement: true }).jpeg({ quality: 80 }).toFile(tmp);
+        renameSync(tmp, cached);
+      }
+      res.set("Cache-Control", "public, max-age=604800, immutable").type("jpeg").sendFile(cached);
+    } catch (e) {
+      console.error("resize failed", e);
+      res.status(500).end();
+    }
+  });
   app.use("/static", express.static(WEB_DIR, { maxAge: "5m", index: false }));
 
   app.get("/healthz", (_req, res) => void res.json({ ok: true }));
@@ -133,6 +164,19 @@ export function createServer() {
     const products = listProducts(shop.id).map(serializeProduct);
     const categories = [...new Set(products.map((p) => p.category).filter(Boolean))];
     res.json({ shop: serializeShop(shop), categories, products });
+  });
+
+  /** The buyer's own orders (Telegram identity required). */
+  app.get("/api/my-orders", (req, res) => {
+    const shop = getShopBySlug(String(req.query.slug ?? ""));
+    const user = validateInitData(req.get("x-tg-init") ?? undefined, process.env.BOT_TOKEN);
+    if (!shop || !user) return void res.json({ auth: false, orders: [] });
+    res.json({
+      auth: true,
+      orders: listBuyerOrders(shop.id, user.id).map((o) => ({
+        id: o.id, status: o.status, total: o.total, discount: o.discount, delivery: o.delivery, created_at: o.created_at, items: getOrderItems(o.id),
+      })),
+    });
   });
 
   /** Validates cart lines against the shop and returns the products to price. */
@@ -278,6 +322,13 @@ export function createServer() {
       url: process.env.MINIAPP_SHORTNAME
         ? `https://t.me/${process.env.BOT_USERNAME ?? "savia_shop_bot"}/${process.env.MINIAPP_SHORTNAME}?startapp=${shop.slug}`
         : `${(process.env.PUBLIC_URL ?? `https://${process.env.RAILWAY_PUBLIC_DOMAIN ?? "localhost:3000"}`).replace(/\/$/, "")}/s/${shop.slug}`,
+      setup: {
+        products: products.length > 0,
+        contact: !!(shop.contact || shopPhones(shop).length),
+        payment: !!shop.payment,
+        about: !!shop.about,
+        channel: shop.channel_id != null,
+      },
       stats: {
         products: products.length,
         ordersNew: orders.filter((o) => o.status === "new").length,
@@ -361,7 +412,7 @@ export function createServer() {
     res.json({
       settings: {
         name: shop.name, about: shop.about, contact: shop.contact, payment: shop.payment, address: shop.address,
-        phones: shopPhones(shop), minOrder: shop.min_order, deliveryFee: shop.delivery_fee, freeFrom: shop.free_from,
+        phones: shopPhones(shop), minOrder: shop.min_order, deliveryFee: shop.delivery_fee, freeFrom: shop.free_from, accent: shop.accent,
       },
       promos: listPromos(shop.id),
     });
@@ -385,6 +436,7 @@ export function createServer() {
       ...(n(b.minOrder) !== undefined ? { min_order: n(b.minOrder)! } : {}),
       ...(n(b.deliveryFee) !== undefined ? { delivery_fee: n(b.deliveryFee)! } : {}),
       ...(n(b.freeFrom) !== undefined ? { free_from: n(b.freeFrom)! } : {}),
+      ...(typeof b.accent === "string" && /^(#[0-9a-fA-F]{6})?$/.test(b.accent) ? { accent: b.accent.toLowerCase() } : {}),
     });
     res.json({ ok: true });
   });
